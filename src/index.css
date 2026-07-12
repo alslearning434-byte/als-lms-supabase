@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--body-bg);
+  transition: background 0.3s, color 0.3s;
+}
+
+:root {
+  --body-bg: #f1f5f9;
+  --card-bg: #fff;
+  --border: #e2e8f0;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --header-bg: #fff;
+  --input-bg: #f8fafc;
+}
+
+.dark {
+  --body-bg: #0f172a;
+  --card-bg: #1e293b;
+  --border: #334155;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --header-bg: #1e293b;
+  --input-bg: #0f172a;
+}
+
+.dark .bg-white { background: var(--card-bg) !important; }
+.dark .text-gray-800, .dark .text-gray-900 { color: var(--text-primary) !important; }
+.dark .text-gray-700 { color: #e2e8f0 !important; }
+.dark .text-gray-500, .dark .text-gray-600 { color: var(--text-secondary) !important; }
+.dark .text-gray-400 { color: #64748b !important; }
+.dark .border-gray-200 { border-color: var(--border) !important; }
+.dark .border-gray-100 { border-color: #334155 !important; }
+.dark .bg-gray-50 { background: var(--input-bg) !important; }
+.dark .bg-gray-100 { background: #1e293b !important; }
+
+/* Override for login/register form — stays light mode in dark mode */
+.dark .bg-white.force-white-bg { background: #fff !important; }
+.dark .force-gray-50-bg, .dark .bg-gray-50.force-gray-50-bg { background: #f9fafb !important; }
+.dark .force-gray-50-bg:focus, .dark .bg-gray-50.force-gray-50-bg:focus { background: #fff !important; }
+.dark .force-light-mode .text-gray-800,
+.dark .force-light-mode .text-gray-900 { color: #1e293b !important; }
+.dark .force-light-mode .text-gray-700 { color: #334155 !important; }
+.dark .force-light-mode .text-gray-500,
+.dark .force-light-mode .text-gray-600 { color: #64748b !important; }
+.dark .force-light-mode .text-gray-400 { color: #94a3b8 !important; }
+.dark .force-light-mode .border-gray-200 { border-color: #e5e7eb !important; }
+.dark .force-light-mode .border-gray-100 { border-color: #f3f4f6 !important; }
+.dark .force-light-mode .bg-gray-100 { background: #f3f4f6 !important; }
+.dark .force-light-mode .hover\:bg-gray-50:hover { background: #f9fafb !important; }
+.dark .force-light-mode .shadow-sm { box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important; }
+.dark .force-light-mode .shadow-xl { box-shadow: 0 8px 25px rgba(0,0,0,0.1) !important; }
+.dark .hover\:bg-gray-50:hover { background: #1e293b !important; }
+.dark .hover\:bg-red-50:hover { background: rgba(239, 68, 68, 0.1) !important; }
+.dark .shadow-sm { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important; }
+.dark .shadow-md { box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3) !important; }
+.dark .shadow-xl { box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4) !important; }
+.dark .shadow-lg { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35) !important; }
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(37, 99, 235, 0.15); }
+  50% { box-shadow: 0 0 40px rgba(37, 99, 235, 0.3); }
+}
+@keyframes fadeInDropdown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: scale(0.92) translateY(12px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes dotPulse {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-4px); }
+}
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.animate-float { animation: float 4s ease-in-out infinite; }
+.animate-fade { animation: fadeIn 0.8s ease-out forwards; }
+.animate-fade-1 { animation: fadeIn 0.8s ease-out 0.1s both; }
+.animate-fade-2 { animation: fadeIn 0.8s ease-out 0.2s both; }
+.animate-fade-3 { animation: fadeIn 0.8s ease-out 0.3s both; }
+.animate-fade-4 { animation: fadeIn 0.8s ease-out 0.4s both; }
+.animate-fade-5 { animation: fadeIn 0.8s ease-out 0.5s both; }
+.card-glow { animation: pulse-glow 3s ease-in-out infinite; }
+
+.bg-pattern {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.nav-item {
+  display: flex; align-items: center; gap: 14px; padding: 14px 22px;
+  color: rgba(255, 255, 255, 0.65); font-size: 15px; font-weight: 500;
+  transition: all 0.2s; cursor: pointer; border-radius: 10px; margin: 2px 0;
+}
+.nav-item:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+.nav-item.active { background: #2563eb; color: #fff; }
+
+.stat-card {
+  background: var(--card-bg); border-radius: 12px; padding: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06); border: 1px solid var(--border);
+}
+.module-card {
+  background: var(--card-bg); border-radius: 12px; padding: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06); border: 1px solid var(--border);
+}
+
+.progress-bar { height: 6px; border-radius: 99px; background: #e2e8f0; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 99px; transition: width 0.5s ease; }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+
+.deadline-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 0; border-bottom: 1px solid var(--border);
+}
+.deadline-item:last-child { border-bottom: none; }
+
+.student-name-tooltip {
+  position: relative; cursor: help; border-bottom: 1px dashed #94a3b8;
+}
+.student-name-tooltip:hover::after {
+  content: attr(data-tooltip); position: absolute; bottom: 100%; left: 0;
+  transform: translateY(-8px); background: #1e293b; color: #fff;
+  font-size: 11px; padding: 4px 8px; border-radius: 6px;
+  white-space: nowrap; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  pointer-events: none;
+}
+.dark .student-name-tooltip:hover::after {
+  background: #f1f5f9; color: #1e293b;
+}
