@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import Sidebar from "../components/Sidebar"
 import TopBar from "../components/TopBar"
@@ -7,6 +7,10 @@ import LogoutModal from "../components/LogoutModal"
 import ChangePasswordModal from "../components/ChangePasswordModal"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
+import { db } from "../firebase"
+import { collection, getDocs, addDoc } from "firebase/firestore"
+import { createUserWithEmailAndPassword } from "firebase/auth"
+import { auth } from "../firebase"
 import type { NavItem } from "../types"
 
 const navItems: NavItem[] = [
@@ -46,14 +50,40 @@ export default function Admin() {
   const [calInput, setCalInput] = useState("")
   const [announcements, setAnnouncements] = useState<Record<string, string[]>>({})
   const [userFilter, setUserFilter] = useState("jhs")
+  const [userPage, setUserPage] = useState(1)
+  const userPageSize = 10
   const [addTeacherOpen, setAddTeacherOpen] = useState(false)
-  const [teacherForm, setTeacherForm] = useState({ name: "", employeeId: "", email: "", department: "", contact: "" })
+  const [teacherForm, setTeacherForm] = useState({ name: "", employeeId: "", email: "", department: "", contact: "", password: "" })
+  const [teacherSaving, setTeacherSaving] = useState(false)
+  const [teacherError, setTeacherError] = useState("")
+  const [teachers, setTeachers] = useState<{ uid: string; displayName: string; email: string; department: string; employeeId: string; phone: string; joinDate: string }[]>([])
   const [enrollmentModalOpen, setEnrollmentModalOpen] = useState(false)
   const [jhsModalOpen, setJhsModalOpen] = useState(false)
   const [shsModalOpen, setShsModalOpen] = useState(false)
   const [jhsPage, setJhsPage] = useState(1)
   const [shsPage, setShsPage] = useState(1)
   const isDark = theme === "dark"
+
+  useEffect(() => {
+    const fetchTeachers = async () => {
+      const snap = await getDocs(collection(db, "users"))
+      const items = snap.docs
+        .map((d) => ({ uid: d.id, ...d.data() } as { uid: string; displayName: string; email: string; role: string; department?: string; employeeId?: string; phone?: string; joinDate?: string }))
+        .filter((u) => u.role === "teacher")
+      setTeachers(items.map((t) => ({
+        uid: t.uid,
+        displayName: t.displayName,
+        email: t.email,
+        department: t.department || "",
+        employeeId: t.employeeId || "",
+        phone: t.phone || "",
+        joinDate: t.joinDate || "",
+      })))
+    }
+    fetchTeachers()
+  }, [])
+
+  useEffect(() => { setUserPage(1) }, [userFilter])
 
   const goTo = (page: string) => setActivePage(page)
 
@@ -122,6 +152,80 @@ export default function Admin() {
     { rank: 30, name: "Noel Tengco", section: "Section E", score: "45%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" }
   ]
 
+  const allUserRows = (userFilter === "jhs" ? [
+    { initials: "JD", name: "Juan Dela Cruz", email: "juan.delacruz@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2026", initialsBg: "bg-amber-100 text-amber-600" },
+    { initials: "PR", name: "Pedro Reyes", email: "pedro.reyes@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Feb 2026", initialsBg: "bg-red-100 text-red-600" },
+    { initials: "AG", name: "Ana Gomez", email: "ana.gomez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2026", initialsBg: "bg-blue-100 text-blue-600" },
+    { initials: "CT", name: "Carlos Tan", email: "carlos.tan@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2025", initialsBg: "bg-teal-100 text-teal-600" },
+    { initials: "MF", name: "Maria Flores", email: "maria.flores@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Oct 2025", initialsBg: "bg-pink-100 text-pink-600" },
+    { initials: "RG", name: "Ricardo Garcia", email: "ricardo.garcia@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2025", initialsBg: "bg-indigo-100 text-indigo-600" },
+    { initials: "LS", name: "Liza Santos", email: "liza.santos@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Aug 2025", initialsBg: "bg-rose-100 text-rose-600" },
+    { initials: "BM", name: "Ben Mendoza", email: "ben.mendoza@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2025", initialsBg: "bg-cyan-100 text-cyan-600" },
+    { initials: "CV", name: "Celia Villanueva", email: "celia.villanueva@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jun 2025", initialsBg: "bg-lime-100 text-lime-600" },
+    { initials: "DA", name: "Dante Aquino", email: "dante.aquino@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "May 2025", initialsBg: "bg-orange-100 text-orange-600" },
+    { initials: "ES", name: "Elena Santiago", email: "elena.santiago@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Apr 2025", initialsBg: "bg-purple-100 text-purple-600" },
+    { initials: "FC", name: "Fernando Cruz", email: "fernando.cruz@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2025", initialsBg: "bg-yellow-100 text-yellow-600" },
+    { initials: "GV", name: "Gina Villar", email: "gina.villar@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Feb 2025", initialsBg: "bg-emerald-100 text-emerald-600" },
+    { initials: "HS", name: "Hector Santos", email: "hector.santos@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2025", initialsBg: "bg-sky-100 text-sky-600" },
+    { initials: "IR", name: "Isabella Ramos", email: "isabella.ramos@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Dec 2024", initialsBg: "bg-violet-100 text-violet-600" },
+    { initials: "JB", name: "Joel Bautista", email: "joel.bautista@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2024", initialsBg: "bg-fuchsia-100 text-fuchsia-600" },
+    { initials: "KL", name: "Karen Lim", email: "karen.lim@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Oct 2024", initialsBg: "bg-rose-100 text-rose-600" },
+    { initials: "LF", name: "Leo Fernandez", email: "leo.fernandez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2024", initialsBg: "bg-teal-100 text-teal-600" },
+    { initials: "MD", name: "Mona Dela Torre", email: "mona.delatorre@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Aug 2024", initialsBg: "bg-amber-100 text-amber-600" },
+    { initials: "NA", name: "Nestor Aguilar", email: "nestor.aguilar@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2024", initialsBg: "bg-blue-100 text-blue-600" },
+    { initials: "OM", name: "Olivia Manalo", email: "olivia.manalo@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jun 2024", initialsBg: "bg-indigo-100 text-indigo-600" },
+    { initials: "PR2", name: "Paolo Ramirez", email: "paolo.ramirez@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "May 2024", initialsBg: "bg-pink-100 text-pink-600" },
+    { initials: "QS", name: "Queenie Sison", email: "queenie.sison@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Apr 2024", initialsBg: "bg-cyan-100 text-cyan-600" },
+    { initials: "RT", name: "Rafael Torres", email: "rafael.torres@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2024", initialsBg: "bg-lime-100 text-lime-600" },
+    { initials: "SM", name: "Sofia Mercado", email: "sofia.mercado@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Feb 2024", initialsBg: "bg-orange-100 text-orange-600" },
+    { initials: "TR", name: "Tomas Rivera", email: "tomas.rivera@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2024", initialsBg: "bg-purple-100 text-purple-600" },
+    { initials: "UD", name: "Ursula David", email: "ursula.david@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Dec 2023", initialsBg: "bg-sky-100 text-sky-600" },
+    { initials: "VG", name: "Victor Gonzales", email: "victor.gonzales@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2023", initialsBg: "bg-emerald-100 text-emerald-600" },
+    { initials: "WP", name: "Wanda Pineda", email: "wanda.pineda@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Oct 2023", initialsBg: "bg-violet-100 text-violet-600" },
+    { initials: "XL", name: "Xavier Lozano", email: "xavier.lozano@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2023", initialsBg: "bg-fuchsia-100 text-fuchsia-600" }
+  ] : userFilter === "shs" ? [
+    { initials: "MS", name: "Maria Santos", email: "maria.santos@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2026", initialsBg: "bg-blue-100 text-blue-600" },
+    { initials: "JL", name: "Jose Lopez", email: "jose.lopez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Dec 2025", initialsBg: "bg-purple-100 text-purple-600" },
+    { initials: "RM", name: "Rosa Mendoza", email: "rosa.mendoza@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Oct 2025", initialsBg: "bg-pink-100 text-pink-600" },
+    { initials: "KT", name: "Kevin Torres", email: "kevin.torres@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2025", initialsBg: "bg-teal-100 text-teal-600" },
+    { initials: "NP", name: "Nina Perez", email: "nina.perez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Aug 2025", initialsBg: "bg-indigo-100 text-indigo-600" },
+    { initials: "OR", name: "Oscar Ramos", email: "oscar.ramos@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2025", initialsBg: "bg-amber-100 text-amber-600" },
+    { initials: "PM", name: "Paula Martinez", email: "paula.martinez@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Jun 2025", initialsBg: "bg-rose-100 text-rose-600" },
+    { initials: "QC", name: "Quinn Cruz", email: "quinn.cruz@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "May 2025", initialsBg: "bg-cyan-100 text-cyan-600" },
+    { initials: "RD", name: "Ria Dimagiba", email: "ria.dimagiba@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Apr 2025", initialsBg: "bg-lime-100 text-lime-600" },
+    { initials: "SJ", name: "Sam Jimenez", email: "sam.jimenez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2025", initialsBg: "bg-orange-100 text-orange-600" },
+    { initials: "TA", name: "Trisha Angeles", email: "trisha.angeles@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Feb 2025", initialsBg: "bg-purple-100 text-purple-600" },
+    { initials: "US", name: "Uriel Salvacion", email: "uriel.salvacion@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2025", initialsBg: "bg-sky-100 text-sky-600" },
+    { initials: "VM", name: "Vince Macapagal", email: "vince.macapagal@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Dec 2024", initialsBg: "bg-emerald-100 text-emerald-600" },
+    { initials: "WC", name: "Wendy Corpuz", email: "wendy.corpuz@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2024", initialsBg: "bg-violet-100 text-violet-600" },
+    { initials: "YD", name: "Yanni Del Rosario", email: "yanni.delrosario@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Oct 2024", initialsBg: "bg-fuchsia-100 text-fuchsia-600" },
+    { initials: "ZC", name: "Zandro Cabrera", email: "zandro.cabrera@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2024", initialsBg: "bg-rose-100 text-rose-600" },
+    { initials: "AP", name: "Angela Pangilinan", email: "angela.pangilinan@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Aug 2024", initialsBg: "bg-amber-100 text-amber-600" },
+    { initials: "BS", name: "Bong Salazar", email: "bong.salazar@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2024", initialsBg: "bg-teal-100 text-teal-600" },
+    { initials: "CL2", name: "Cathy Lopez", email: "cathy.lopez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jun 2024", initialsBg: "bg-blue-100 text-blue-600" },
+    { initials: "DA2", name: "Dexter Alcantara", email: "dexter.alcantara@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "May 2024", initialsBg: "bg-indigo-100 text-indigo-600" },
+    { initials: "EM", name: "Eva Magtoto", email: "eva.magtoto@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Apr 2024", initialsBg: "bg-pink-100 text-pink-600" },
+    { initials: "FN", name: "Freddie Natividad", email: "freddie.natividad@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2024", initialsBg: "bg-cyan-100 text-cyan-600" },
+    { initials: "GZ", name: "Grace Zamora", email: "grace.zamora@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Feb 2024", initialsBg: "bg-lime-100 text-lime-600" },
+    { initials: "HT", name: "Henry Tambong", email: "henry.tambong@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2024", initialsBg: "bg-orange-100 text-orange-600" },
+    { initials: "IV", name: "Iris Valenzuela", email: "iris.valenzuela@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Dec 2023", initialsBg: "bg-purple-100 text-purple-600" },
+    { initials: "JR", name: "Jeko Resurreccion", email: "jeko.resurreccion@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2023", initialsBg: "bg-sky-100 text-sky-600" },
+    { initials: "KM", name: "Kyla Manansala", email: "kyla.manansala@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Oct 2023", initialsBg: "bg-emerald-100 text-emerald-600" },
+    { initials: "LC", name: "Luis Catapang", email: "luis.catapang@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2023", initialsBg: "bg-violet-100 text-violet-600" },
+    { initials: "MA2", name: "Mitch Araneta", email: "mitch.araneta@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Aug 2023", initialsBg: "bg-fuchsia-100 text-fuchsia-600" },
+    { initials: "NT", name: "Noel Tengco", email: "noel.tengco@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2023", initialsBg: "bg-rose-100 text-rose-600" }
+  ] : teachers.map((t) => ({
+    initials: t.displayName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2),
+    name: t.displayName,
+    email: t.email,
+    status: "Active",
+    statusColor: "bg-green-100 text-green-600",
+    joined: t.joinDate || "—",
+    initialsBg: "bg-green-100 text-green-600"
+  })))
+  const userTotalPages = Math.ceil(allUserRows.length / userPageSize)
+  const userPaginatedRows = allUserRows.slice((userPage - 1) * userPageSize, userPage * userPageSize)
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar title="ALS Learning" subtitle="Admin Console" items={navItems} activePage={activePage} onNavigate={goTo} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
@@ -182,11 +286,11 @@ export default function Admin() {
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {[
-                        { status: "Completed", statusColor: "bg-green-100 text-green-600", user: "admin@als.edu", action: "User Provision", time: "May 23, 2026 09:15 AM", detail: "New teacher account created" },
+                        { status: "Completed", statusColor: "bg-green-100 text-green-600", user: "admin@gmail.com", action: "User Provision", time: "May 23, 2026 09:15 AM", detail: "New teacher account created" },
                         { status: "Completed", statusColor: "bg-green-100 text-green-600", user: "system", action: "Backup", time: "May 23, 2026 02:30 AM", detail: "Database backup completed" },
-                        { status: "In Progress", statusColor: "bg-blue-100 text-blue-600", user: "michael.reyes@als.edu", action: "Curriculum Update", time: "May 22, 2026 04:45 PM", detail: "Science module revision pending" },
+                        { status: "In Progress", statusColor: "bg-blue-100 text-blue-600", user: "michael.reyes@gmail.com", action: "Curriculum Update", time: "May 22, 2026 04:45 PM", detail: "Science module revision pending" },
                         { status: "Completed", statusColor: "bg-green-100 text-green-600", user: "system", action: "Security Scan", time: "May 22, 2026 12:00 PM", detail: "Weekly vulnerability scan — no threats" },
-                        { status: "Pending", statusColor: "bg-yellow-100 text-yellow-600", user: "juan.delacruz@als.edu", action: "Registration", time: "May 22, 2026 10:20 AM", detail: "Teacher registration awaiting approval" }
+                        { status: "Pending", statusColor: "bg-yellow-100 text-yellow-600", user: "juan.delacruz@gmail.com", action: "Registration", time: "May 22, 2026 10:20 AM", detail: "Teacher registration awaiting approval" }
                       ].map((r, i) => (
                         <tr key={i} className="hover:bg-gray-50 transition">
                           <td className="px-6 py-4"><span className={`text-xs font-medium ${r.statusColor} px-2 py-0.5 rounded`}>{r.status}</span></td>
@@ -286,40 +390,7 @@ export default function Admin() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {(userFilter === "jhs" ? [
-                        { initials: "JD", name: "Juan Dela Cruz", email: "juan.delacruz@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2026", initialsBg: "bg-amber-100 text-amber-600" },
-                        { initials: "PR", name: "Pedro Reyes", email: "pedro.reyes@als.edu", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Feb 2026", initialsBg: "bg-red-100 text-red-600" },
-                        { initials: "AG", name: "Ana Gomez", email: "ana.gomez@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2026", initialsBg: "bg-blue-100 text-blue-600" },
-                        { initials: "CT", name: "Carlos Tan", email: "carlos.tan@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2025", initialsBg: "bg-teal-100 text-teal-600" },
-                        { initials: "MF", name: "Maria Flores", email: "maria.flores@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Oct 2025", initialsBg: "bg-pink-100 text-pink-600" },
-                        { initials: "RG", name: "Ricardo Garcia", email: "ricardo.garcia@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2025", initialsBg: "bg-indigo-100 text-indigo-600" },
-                        { initials: "LS", name: "Liza Santos", email: "liza.santos@als.edu", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Aug 2025", initialsBg: "bg-rose-100 text-rose-600" },
-                        { initials: "BM", name: "Ben Mendoza", email: "ben.mendoza@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2025", initialsBg: "bg-cyan-100 text-cyan-600" },
-                        { initials: "CV", name: "Celia Villanueva", email: "celia.villanueva@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jun 2025", initialsBg: "bg-lime-100 text-lime-600" },
-                        { initials: "DA", name: "Dante Aquino", email: "dante.aquino@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "May 2025", initialsBg: "bg-orange-100 text-orange-600" }
-                      ] : userFilter === "shs" ? [
-                        { initials: "MS", name: "Maria Santos", email: "maria.santos@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2026", initialsBg: "bg-blue-100 text-blue-600" },
-                        { initials: "JL", name: "Jose Lopez", email: "jose.lopez@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Dec 2025", initialsBg: "bg-purple-100 text-purple-600" },
-                        { initials: "RM", name: "Rosa Mendoza", email: "rosa.mendoza@als.edu", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Oct 2025", initialsBg: "bg-pink-100 text-pink-600" },
-                        { initials: "KT", name: "Kevin Torres", email: "kevin.torres@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2025", initialsBg: "bg-teal-100 text-teal-600" },
-                        { initials: "NP", name: "Nina Perez", email: "nina.perez@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Aug 2025", initialsBg: "bg-indigo-100 text-indigo-600" },
-                        { initials: "OR", name: "Oscar Ramos", email: "oscar.ramos@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2025", initialsBg: "bg-amber-100 text-amber-600" },
-                        { initials: "PM", name: "Paula Martinez", email: "paula.martinez@als.edu", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Jun 2025", initialsBg: "bg-rose-100 text-rose-600" },
-                        { initials: "QC", name: "Quinn Cruz", email: "quinn.cruz@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "May 2025", initialsBg: "bg-cyan-100 text-cyan-600" },
-                        { initials: "RD", name: "Ria Dimagiba", email: "ria.dimagiba@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Apr 2025", initialsBg: "bg-lime-100 text-lime-600" },
-                        { initials: "SJ", name: "Sam Jimenez", email: "sam.jimenez@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2025", initialsBg: "bg-orange-100 text-orange-600" }
-                      ] : [
-                        { initials: "MR", name: "Michael Reyes", email: "michael.reyes@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Aug 2018", initialsBg: "bg-green-100 text-green-600" },
-                        { initials: "LG", name: "Luzviminda Gomez", email: "luzviminda.gomez@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jun 2019", initialsBg: "bg-teal-100 text-teal-600" },
-                        { initials: "DV", name: "David Villanueva", email: "david.villanueva@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2020", initialsBg: "bg-indigo-100 text-indigo-600" },
-                        { initials: "SC", name: "Sofia Castillo", email: "sofia.castillo@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2020", initialsBg: "bg-pink-100 text-pink-600" },
-                        { initials: "AF", name: "Anthony Ferrer", email: "anthony.ferrer@als.edu", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Jun 2020", initialsBg: "bg-rose-100 text-rose-600" },
-                        { initials: "GN", name: "Grace Navarro", email: "grace.navarro@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2020", initialsBg: "bg-cyan-100 text-cyan-600" },
-                        { initials: "EL", name: "Eduardo Lim", email: "eduardo.lim@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Feb 2021", initialsBg: "bg-lime-100 text-lime-600" },
-                        { initials: "ID", name: "Isabel Dizon", email: "isabel.dizon@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2021", initialsBg: "bg-orange-100 text-orange-600" },
-                        { initials: "JG", name: "Josefina Garcia", email: "josefina.garcia@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2022", initialsBg: "bg-purple-100 text-purple-600" },
-                        { initials: "KT", name: "Kristoffer Tan", email: "kristoffer.tan@als.edu", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2022", initialsBg: "bg-amber-100 text-amber-600" }
-                      ]).map((u) => (
+                      {userPaginatedRows.map((u) => (
                         <tr key={u.email} className="hover:bg-gray-50 transition">
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
@@ -339,21 +410,26 @@ export default function Admin() {
                     </tbody>
                   </table>
                 </div>
-                <div className="px-6 py-3 border-t border-gray-200 flex items-center justify-between">
-                  <p className="text-sm text-gray-500">Showing 1-10 of {userFilter === "jhs" ? "284" : userFilter === "shs" ? "858" : "142"} users</p>
-                  <div className="flex gap-1">
-                    <button className="px-3 py-1 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50">Previous</button>
-                    <button className="px-3 py-1 text-sm border border-gray-200 rounded-lg bg-navy-500 text-white">1</button>
-                    <button className="px-3 py-1 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50">2</button>
-                    <button className="px-3 py-1 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50">3</button>
-                    <button className="px-3 py-1 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50">Next</button>
+                {allUserRows.length > userPageSize && (
+                  <div className="px-6 py-3 border-t border-gray-200 flex items-center justify-between">
+                    <p className="text-sm text-gray-500">Showing {(userPage - 1) * userPageSize + 1}-{Math.min(userPage * userPageSize, allUserRows.length)} of {allUserRows.length} users</p>
+                    <div className="flex gap-1">
+                      <button onClick={() => setUserPage((p) => Math.max(1, p - 1))} disabled={userPage === 1}
+                        className="px-3 py-1 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">Previous</button>
+                      {Array.from({ length: userTotalPages }, (_, i) => i + 1).map((p) => (
+                        <button key={p} onClick={() => setUserPage(p)}
+                          className={`px-3 py-1 text-sm border border-gray-200 rounded-lg transition ${userPage === p ? "bg-navy-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>{p}</button>
+                      ))}
+                      <button onClick={() => setUserPage((p) => Math.min(userTotalPages, p + 1))} disabled={userPage === userTotalPages}
+                        className="px-3 py-1 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">Next</button>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
               {/* Add Teacher Modal */}
               {addTeacherOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setAddTeacherOpen(false)}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { if (!teacherSaving) { setAddTeacherOpen(false); setTeacherError(""); } }}>
                   <div className="bg-white rounded-2xl shadow-xl p-7 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
                     <div className="text-center mb-5">
                       <div className="w-16 h-16 rounded-full bg-purple-100 flex items-center justify-center mx-auto mb-4">
@@ -365,46 +441,97 @@ export default function Admin() {
                     <div className="space-y-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Full Name</label>
-                        <input type="text" value={teacherForm.name} onChange={(e) => setTeacherForm(p => ({ ...p, name: e.target.value }))} placeholder="Enter full name"
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500" />
+                        <input type="text" value={teacherForm.name} onChange={(e) => setTeacherForm(p => ({ ...p, name: e.target.value }))} placeholder="Enter full name" disabled={teacherSaving}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:opacity-50" />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Employee ID</label>
-                        <input type="text" value={teacherForm.employeeId} onChange={(e) => setTeacherForm(p => ({ ...p, employeeId: e.target.value }))} placeholder="e.g., TCH-2026-001"
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500" />
+                        <input type="text" value={teacherForm.employeeId} onChange={(e) => setTeacherForm(p => ({ ...p, employeeId: e.target.value }))} placeholder="e.g., TCH-2026-001" disabled={teacherSaving}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:opacity-50" />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Email Address</label>
-                        <input type="email" value={teacherForm.email} onChange={(e) => setTeacherForm(p => ({ ...p, email: e.target.value }))} placeholder="teacher@als.edu"
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500" />
+                        <input type="email" value={teacherForm.email} onChange={(e) => setTeacherForm(p => ({ ...p, email: e.target.value }))} placeholder="teacher@gmail.com" disabled={teacherSaving}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:opacity-50" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+                        <input type="password" value={teacherForm.password} onChange={(e) => setTeacherForm(p => ({ ...p, password: e.target.value }))} placeholder="Minimum 6 characters" disabled={teacherSaving}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:opacity-50" />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Department</label>
-                        <select value={teacherForm.department} onChange={(e) => setTeacherForm(p => ({ ...p, department: e.target.value }))}
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 appearance-none text-gray-500">
+                        <select value={teacherForm.department} onChange={(e) => setTeacherForm(p => ({ ...p, department: e.target.value }))} disabled={teacherSaving}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 appearance-none text-gray-500 disabled:opacity-50">
                           <option value="">Select department</option>
                           <option value="Junior High School">Junior High School</option>
                           <option value="Senior High School">Senior High School</option>
+                          <option value="Science & Mathematics">Science & Mathematics</option>
+                          <option value="English">English</option>
+                          <option value="Filipino">Filipino</option>
+                          <option value="MAPEH">MAPEH</option>
+                          <option value="TLE">TLE</option>
+                          <option value="ABM">ABM</option>
+                          <option value="HUMSS">HUMSS</option>
+                          <option value="STEM">STEM</option>
+                          <option value="TVL">TVL</option>
                         </select>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Contact Number</label>
-                        <input type="text" value={teacherForm.contact} onChange={(e) => setTeacherForm(p => ({ ...p, contact: e.target.value }))} placeholder="e.g., 0917-xxx-xxxx"
-                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500" />
+                        <input type="text" value={teacherForm.contact} onChange={(e) => setTeacherForm(p => ({ ...p, contact: e.target.value }))} placeholder="e.g., 0917-xxx-xxxx" disabled={teacherSaving}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:opacity-50" />
                       </div>
                     </div>
+                    {teacherError && <p className="text-red-500 text-xs mt-3 text-center">{teacherError}</p>}
                     <div className="flex gap-3 mt-6">
-                      <button onClick={() => { setAddTeacherOpen(false); setTeacherForm({ name: "", employeeId: "", email: "", department: "", contact: "" }) }}
-                        className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
-                        Cancel
-                      </button>
-                      <button onClick={() => {
-                        if (!teacherForm.name || !teacherForm.email || !teacherForm.employeeId) return
-                        setAddTeacherOpen(false)
-                        setTeacherForm({ name: "", employeeId: "", email: "", department: "", contact: "" })
+                      {!teacherSaving && (
+                        <button onClick={() => { setAddTeacherOpen(false); setTeacherError(""); setTeacherForm({ name: "", employeeId: "", email: "", department: "", contact: "", password: "" }) }}
+                          className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
+                          Cancel
+                        </button>
+                      )}
+                      <button onClick={async () => {
+                        if (!teacherForm.name || !teacherForm.email || !teacherForm.employeeId || !teacherForm.password) return
+                        if (teacherForm.password.length < 6) { setTeacherError("Password must be at least 6 characters."); return }
+                        setTeacherSaving(true)
+                        setTeacherError("")
+                        try {
+                          const cred = await createUserWithEmailAndPassword(auth, teacherForm.email, teacherForm.password)
+                          const now = new Date()
+                          const joinDate = `${["January","February","March","April","May","June","July","August","September","October","November","December"][now.getMonth()]} ${now.getFullYear()}`
+                          await addDoc(collection(db, "users"), {
+                            uid: cred.user.uid,
+                            displayName: teacherForm.name.trim(),
+                            email: teacherForm.email,
+                            role: "teacher",
+                            employeeId: teacherForm.employeeId.trim(),
+                            department: teacherForm.department,
+                            phone: teacherForm.contact.trim(),
+                            joinDate,
+                          })
+                          setTeachers((prev) => [...prev, {
+                            uid: cred.user.uid,
+                            displayName: teacherForm.name.trim(),
+                            email: teacherForm.email,
+                            department: teacherForm.department,
+                            employeeId: teacherForm.employeeId.trim(),
+                            phone: teacherForm.contact.trim(),
+                            joinDate,
+                          }])
+                          setTeacherForm({ name: "", employeeId: "", email: "", department: "", contact: "", password: "" })
+                          setAddTeacherOpen(false)
+                        } catch (err: unknown) {
+                          const msg = err instanceof Error ? err.message : "Failed to create teacher account."
+                          if (msg.includes("email-already")) setTeacherError("This email is already registered.")
+                          else setTeacherError(msg)
+                        } finally {
+                          setTeacherSaving(false)
+                        }
                       }}
-                        className="flex-1 py-2.5 rounded-xl bg-navy-500 text-white text-sm font-medium hover:bg-navy-600 transition">
-                        <i className="fas fa-user-plus text-sm mr-1.5" /> Add Teacher
+                        disabled={teacherSaving || !teacherForm.name || !teacherForm.email || !teacherForm.employeeId || !teacherForm.password}
+                        className="flex-1 py-2.5 rounded-xl bg-navy-500 text-white text-sm font-medium hover:bg-navy-600 transition flex items-center justify-center gap-2 disabled:opacity-70">
+                        {teacherSaving ? <><i className="fas fa-spinner fa-spin text-xs" /> Creating...</> : <><i className="fas fa-user-plus text-sm" /> Add Teacher</>}
                       </button>
                     </div>
                   </div>
