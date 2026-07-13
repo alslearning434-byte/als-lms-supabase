@@ -13,6 +13,7 @@ dist-ssr
 *.local
 uploads
 student-credentials.txt
+teacher-credentials.txt
 
 # Editor directories and files
 .vscode/*

@@ -45,9 +45,13 @@ export default function Teacher() {
   const [now, setNow] = useState(new Date())
   const [cohortModal, setCohortModal] = useState(false)
   const [cohortLevel, setCohortLevel] = useState("")
+  const [cohortPage, setCohortPage] = useState(1)
   const [resourceUploadOpen, setResourceUploadOpen] = useState(false)
   const [analyticsModalOpen, setAnalyticsModalOpen] = useState(false)
   const [completionExpanded, setCompletionExpanded] = useState(false)
+  const [cohortCounts, setCohortCounts] = useState({ jhs: 0, shs: 0 })
+  const [colleagues, setColleagues] = useState<{ name: string; dept: string; email: string; status: string; level: string }[]>([])
+  const [totalStudents, setTotalStudents] = useState(0)
   const [assessments, setAssessments] = useState<{ title: string; description: string; questions: { text: string; type: string; options: string[] }[] }[]>([])
   const [assTitle, setAssTitle] = useState("")
   const [assDesc, setAssDesc] = useState("")
@@ -103,6 +107,38 @@ export default function Teacher() {
     const timer = setInterval(() => setNow(new Date()), 60000)
     return () => clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    const fetchCohortData = async () => {
+      const snap = await getDocs(collection(db, "users"))
+      let jhs = 0, shs = 0, total = 0
+      const teacherList: { name: string; dept: string; email: string; status: string; level: string }[] = []
+      snap.docs.forEach((d) => {
+        const data = d.data()
+        if (data.role === "student") {
+          total++
+          const gl = data.gradeLevel || ""
+          if (gl.startsWith("Grade") && !gl.startsWith("Senior")) jhs++
+          else shs++
+        } else if (data.role === "teacher" && data.uid !== profile?.uid) {
+          const dept = data.department || ""
+          let level = "Junior High School"
+          if (["Senior High School", "ABM", "HUMSS", "STEM", "TVL"].includes(dept)) level = "Senior High School"
+          teacherList.push({
+            name: data.displayName || "",
+            dept,
+            email: data.email || "",
+            status: "Active",
+            level,
+          })
+        }
+      })
+      setCohortCounts({ jhs, shs })
+      setTotalStudents(total)
+      setColleagues(teacherList)
+    }
+    fetchCohortData()
+  }, [profile?.uid])
 
   const handleResourceUpload = async () => {
     if (!resSubject.trim() || !resTitle.trim() || !resFile) return
@@ -186,16 +222,9 @@ export default function Teacher() {
     return map[status] || "bg-gray-100 text-gray-700"
   }
 
-  const colleagues = [
-    { name: "Maria Santos", dept: "English", email: "maria.santos@als.edu", status: "Active", level: "Junior High School" },
-    { name: "Juan Dela Cruz", dept: "STEM", email: "juan.dc@als.edu", status: "Active", level: "Senior High School" },
-    { name: "Ana Gomez", dept: "Mathematics", email: "ana.gomez@als.edu", status: "Active", level: "Junior High School" },
-    { name: "Carlos Tan", dept: "HUMSS", email: "carlos.tan@als.edu", status: "Inactive", level: "Senior High School" },
-    { name: "Liza Santos", dept: "Science", email: "liza.santos@als.edu", status: "Active", level: "Junior High School" },
-    { name: "Pedro Reyes", dept: "ABM", email: "pedro.reyes@als.edu", status: "Active", level: "Senior High School" },
-    { name: "Rosa Mendoza", dept: "MAPEH", email: "rosa.mendoza@als.edu", status: "Active", level: "Junior High School" },
-    { name: "Kevin Torres", dept: "TVL", email: "kevin.torres@als.edu", status: "Active", level: "Senior High School" }
-  ]
+  const cohortPageSize = 10
+  const cohortTotalPages = Math.ceil(colleagues.length / cohortPageSize)
+  const cohortPaginated = colleagues.slice((cohortPage - 1) * cohortPageSize, cohortPage * cohortPageSize)
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -215,9 +244,9 @@ export default function Teacher() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
                 {[
-                  { label: "Total Enrolled Students", value: "247", icon: "fa-users", color: "bg-blue-100 text-blue-600" },
+                  { label: "Total Enrolled Students", value: String(totalStudents), icon: "fa-users", color: "bg-blue-100 text-blue-600" },
                   { label: "Pending Submissions", value: "18", icon: "fa-file-alt", color: "bg-amber-100 text-amber-600" },
-                  { label: "Active Cohort", value: "4", icon: "fa-chalkboard", color: "bg-green-100 text-green-600" }
+                  { label: "Active Cohorts", value: String(cohortCounts.jhs + cohortCounts.shs), icon: "fa-chalkboard", color: "bg-green-100 text-green-600" }
                 ].map((s) => (
                   <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex items-center justify-between">
                     <div>
@@ -246,12 +275,12 @@ export default function Teacher() {
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {[
-                        { level: "Junior High School", cohorts: 6, updated: "May 26, 2026" },
-                        { level: "Senior High School", cohorts: 5, updated: "May 26, 2026" }
+                        { level: "Junior High School", cohorts: cohortCounts.jhs, updated: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) },
+                        { level: "Senior High School", cohorts: cohortCounts.shs, updated: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) }
                       ].map((c, i) => (
                         <tr key={i} className="hover:bg-gray-50 transition">
                           <td className="px-6 py-4 text-sm font-medium text-gray-800">{c.level}</td>
-                          <td className="px-6 py-4 text-sm text-gray-600">{c.cohorts} cohorts</td>
+                          <td className="px-6 py-4 text-sm text-gray-600">{c.cohorts} students</td>
                           <td className="px-6 py-4 text-sm text-gray-600">{c.updated}</td>
                           <td className="px-6 py-4 text-sm">
                             <button onClick={() => { setCohortLevel(c.level); setCohortModal(true) }} className="text-blue-600 hover:text-blue-800 font-medium bg-transparent border-none cursor-pointer">View</button>
@@ -313,7 +342,7 @@ export default function Teacher() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {colleagues.map((c, i) => (
+                      {cohortPaginated.map((c, i) => (
                         <tr key={c.name} className={`${i % 2 === 0 ? "bg-white" : "bg-gray-50"} hover:bg-blue-50 transition`}>
                           <td className="px-6 py-4 text-sm font-medium text-gray-800">{c.name}</td>
                           <td className="px-6 py-4 text-sm text-gray-600">{c.dept}</td>
@@ -321,9 +350,27 @@ export default function Teacher() {
                           <td className="px-6 py-4 text-sm"><span className={`text-xs font-medium px-2 py-0.5 rounded ${c.status === "Active" ? "bg-green-100 text-green-600" : "bg-yellow-100 text-yellow-600"}`}>{c.status}</span></td>
                         </tr>
                       ))}
+                      {cohortPaginated.length === 0 && (
+                        <tr><td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-400">No fellow teachers found.</td></tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
+                {colleagues.length > cohortPageSize && (
+                  <div className="px-6 py-3 border-t border-gray-200 flex items-center justify-between">
+                    <p className="text-sm text-gray-500">Showing {(cohortPage - 1) * cohortPageSize + 1}-{Math.min(cohortPage * cohortPageSize, colleagues.length)} of {colleagues.length} teachers</p>
+                    <div className="flex gap-1">
+                      <button onClick={() => setCohortPage((p) => Math.max(1, p - 1))} disabled={cohortPage === 1}
+                        className="px-3 py-1 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">Previous</button>
+                      {Array.from({ length: cohortTotalPages }, (_, i) => i + 1).map((p) => (
+                        <button key={p} onClick={() => setCohortPage(p)}
+                          className={`px-3 py-1 text-sm border border-gray-200 rounded-lg transition ${cohortPage === p ? "bg-navy-500 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>{p}</button>
+                      ))}
+                      <button onClick={() => setCohortPage((p) => Math.min(cohortTotalPages, p + 1))} disabled={cohortPage === cohortTotalPages}
+                        className="px-3 py-1 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">Next</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
