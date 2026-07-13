@@ -18,6 +18,10 @@ export interface UserProfile {
   role: UserRole
   lrn?: string
   gradeLevel?: string
+  phone?: string
+  employeeId?: string
+  department?: string
+  joinDate?: string
 }
 
 interface AuthContextValue {
@@ -33,7 +37,7 @@ interface AuthContextValue {
     gradeLevel?: string
   }) => Promise<UserProfile>
   logout: () => Promise<void>
-  updateProfile: (data: Partial<Pick<UserProfile, "displayName" | "email" | "lrn" | "gradeLevel">>) => Promise<void>
+  updateProfile: (data: Partial<Pick<UserProfile, "displayName" | "email" | "lrn" | "gradeLevel" | "phone" | "employeeId" | "department" | "joinDate">>) => Promise<void>
   sessionConflict: boolean
   resolveConflict: () => void
 }
@@ -179,7 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null)
   }
 
-  const updateProfile = async (data: Partial<Pick<UserProfile, "displayName" | "email" | "lrn" | "gradeLevel">>) => {
+  const updateProfile = async (data: Partial<Pick<UserProfile, "displayName" | "email" | "lrn" | "gradeLevel" | "phone" | "employeeId" | "department" | "joinDate">>) => {
     if (!user || !profile) return
     const updated = { ...profile, ...data }
     await updateDoc(doc(db, "users", user.uid), data)

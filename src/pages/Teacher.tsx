@@ -34,6 +34,9 @@ export default function Teacher() {
   const [editOpen, setEditOpen] = useState(false)
   const [editFirstName, setEditFirstName] = useState("")
   const [editLastName, setEditLastName] = useState("")
+  const [editPhone, setEditPhone] = useState("")
+  const [editEmployeeId, setEditEmployeeId] = useState("")
+  const [editDepartment, setEditDepartment] = useState("")
   const [editSaving, setEditSaving] = useState(false)
   const [detailId, setDetailId] = useState<number | null>(null)
   const [calYear, setCalYear] = useState(new Date().getFullYear())
@@ -938,12 +941,14 @@ export default function Teacher() {
                       </div>
                     </div>
                     <h3 className="text-xl font-bold text-gray-800 mt-4">{profile?.displayName || "Teacher"}</h3>
-                    <p className="text-sm text-gray-400 capitalize">{profile?.role || "teacher"}</p>
+                    <p className="text-sm text-gray-400">{profile?.department || "Senior Teacher"}</p>
                     <div className="mt-5 pt-5 border-t border-gray-100">
                       <div className="space-y-3">
                         <p className="text-sm text-gray-500"><i className="fas fa-envelope w-4" /> {profile?.email || ""}</p>
-                        {profile?.lrn && <p className="text-sm text-gray-500"><i className="fas fa-id-badge w-4" /> LRN: {profile.lrn}</p>}
-                        {profile?.gradeLevel && <p className="text-sm text-gray-500"><i className="fas fa-chalkboard w-4" /> Grade: {profile.gradeLevel}</p>}
+                        {profile?.phone && <p className="text-sm text-gray-500"><i className="fas fa-phone w-4" /> {profile.phone}</p>}
+                        {profile?.employeeId && <p className="text-sm text-gray-500"><i className="fas fa-id-badge w-4" /> {profile.employeeId}</p>}
+                        {profile?.department && <p className="text-sm text-gray-500"><i className="fas fa-chalkboard w-4" /> {profile.department}</p>}
+                        {profile?.joinDate && <p className="text-sm text-gray-500"><i className="fas fa-calendar w-4" /> Joined {profile.joinDate}</p>}
                       </div>
                     </div>
                   </div>
@@ -956,6 +961,9 @@ export default function Teacher() {
                         const parts = (profile?.displayName || "").split(" ")
                         setEditFirstName(parts[0] || "")
                         setEditLastName(parts.slice(1).join(" ") || "")
+                        setEditPhone(profile?.phone || "")
+                        setEditEmployeeId(profile?.employeeId || "")
+                        setEditDepartment(profile?.department || "")
                         setEditOpen(true)
                       }} className="px-4 py-2 bg-navy-500 text-white text-sm rounded-lg">Edit</button>
                     </div>
@@ -964,7 +972,9 @@ export default function Teacher() {
                         { label: "First Name", value: profile?.displayName?.split(" ")[0] || "—" },
                         { label: "Last Name", value: profile?.displayName?.split(" ").slice(1).join(" ") || "—" },
                         { label: "Email", value: profile?.email || "—" },
-                        { label: "Role", value: profile?.role ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1) : "—" },
+                        { label: "Phone", value: profile?.phone || "—" },
+                        { label: "Employee ID", value: profile?.employeeId || "—" },
+                        { label: "Department", value: profile?.department || "—" },
                       ].map((f) => (
                         <div key={f.label}><label className="text-xs text-gray-400">{f.label}</label><p className="font-medium">{f.value}</p></div>
                       ))}
@@ -1219,7 +1229,7 @@ export default function Teacher() {
       {/* Edit Profile Modal */}
       {editOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { if (!editSaving) setEditOpen(false) }}>
-          <div className="bg-white rounded-2xl p-8 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl p-8 max-w-lg w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between mb-4">
               <h3 className="text-lg font-bold">Edit Profile</h3>
               {!editSaving && <button onClick={() => setEditOpen(false)} className="text-2xl">&times;</button>}
@@ -1228,7 +1238,12 @@ export default function Teacher() {
               e.preventDefault()
               setEditSaving(true)
               try {
-                await updateProfile({ displayName: `${editFirstName} ${editLastName}`.trim() })
+                await updateProfile({
+                  displayName: `${editFirstName} ${editLastName}`.trim(),
+                  phone: editPhone.trim(),
+                  employeeId: editEmployeeId.trim(),
+                  department: editDepartment.trim(),
+                })
                 setEditOpen(false)
               } catch {
                 // silently fail
@@ -1252,6 +1267,21 @@ export default function Teacher() {
                   <input type="email" value={profile?.email || ""} disabled
                     className="w-full border rounded-lg p-2 text-sm bg-gray-50 text-gray-400 cursor-not-allowed" />
                   <p className="text-[10px] text-gray-400 mt-1">Email cannot be changed</p>
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs text-gray-400 mb-1 block">Phone</label>
+                  <input type="tel" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="e.g. +63 917 654 3210" disabled={editSaving}
+                    className="w-full border rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Employee ID</label>
+                  <input type="text" value={editEmployeeId} onChange={(e) => setEditEmployeeId(e.target.value)} placeholder="e.g. TCH-2018-0045" disabled={editSaving}
+                    className="w-full border rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Department</label>
+                  <input type="text" value={editDepartment} onChange={(e) => setEditDepartment(e.target.value)} placeholder="e.g. Science & Mathematics" disabled={editSaving}
+                    className="w-full border rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50" />
                 </div>
               </div>
               <div className="flex gap-3 mt-6">
