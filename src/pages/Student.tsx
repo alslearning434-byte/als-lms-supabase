@@ -8,7 +8,7 @@ import ChangePasswordModal from "../components/ChangePasswordModal"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
 import { db } from "../firebase"
-import { collection, getDocs } from "firebase/firestore"
+import { collection, getDocs, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore"
 import type { NavItem, Resource } from "../types"
 
 const navItems: NavItem[] = [
@@ -39,7 +39,7 @@ function getSubjectIcon(subject: string): { icon: string; color: string; bg: str
 export default function Student() {
   const navigate = useNavigate()
   const { theme, toggle: toggleTheme } = useTheme()
-  const { logout, profile } = useAuth()
+  const { logout, profile, user } = useAuth()
   const [activePage, setActivePage] = useState("dashboard")
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [logoutOpen, setLogoutOpen] = useState(false)
@@ -57,6 +57,7 @@ export default function Student() {
   const [resources, setResources] = useState<Resource[]>([])
   const [modalResource, setModalResource] = useState<Resource | null>(null)
   const [viewContent, setViewContent] = useState<{ resource: Resource; moduleIdx: number } | null>(null)
+  const [progressMap, setProgressMap] = useState<Record<string, number[]>>({})
 
   const t = (text: string): string => {
     if (language !== "tl") return text
@@ -263,11 +264,41 @@ export default function Student() {
           }
         })
         setResources(fetched)
+
+        if (user?.uid && fetched.length > 0) {
+          const pMap: Record<string, number[]> = {}
+          await Promise.all(fetched.map(async (r) => {
+            try {
+              const pSnap = await getDoc(doc(db, "moduleProgress", `${user.uid}_${r.id}`))
+              if (pSnap.exists()) {
+                pMap[r.id] = pSnap.data().viewedModules || []
+              }
+            } catch { /* offline */ }
+          }))
+          setProgressMap(pMap)
+        }
       } catch (err) {
         console.error("Failed to fetch resources:", err)
       }
     })()
-  }, [])
+  }, [user])
+
+  const markModuleViewed = async (resourceId: string, moduleIdx: number) => {
+    if (!user?.uid) return
+    const key = `${user.uid}_${resourceId}`
+    const current = progressMap[resourceId] || []
+    if (current.includes(moduleIdx)) return
+    const updated = [...current, moduleIdx]
+    setProgressMap(prev => ({ ...prev, [resourceId]: updated }))
+    try {
+      await setDoc(doc(db, "moduleProgress", key), {
+        userId: user.uid,
+        resourceId,
+        viewedModules: updated,
+        lastViewedAt: serverTimestamp(),
+      })
+    } catch { /* offline */ }
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -486,8 +517,8 @@ export default function Student() {
             <div>
               <h2 className="text-2xl font-bold text-gray-800">{t("My Modules")}</h2>
               <p className="text-gray-500 mt-1 mb-6">{t("Access your learning materials and lessons")}</p>
-              <ModuleModal resource={modalResource} onClose={() => setModalResource(null)} onViewContent={(r, idx) => { setModalResource(null); setViewContent({ resource: r, moduleIdx: idx }) }} t={t} />
-              <ModuleViewer data={viewContent} onBack={() => { setViewContent(null) }} onClose={() => setViewContent(null)} onNavigate={(idx) => setViewContent(prev => prev ? { ...prev, moduleIdx: idx } : null)} t={t} />
+              <ModuleModal resource={modalResource} viewedModules={modalResource ? (progressMap[modalResource.id] || []) : []} onClose={() => setModalResource(null)} onViewContent={(r, idx) => { setModalResource(null); setViewContent({ resource: r, moduleIdx: idx }); markModuleViewed(r.id, idx) }} t={t} />
+              <ModuleViewer data={viewContent} onBack={() => { setViewContent(null) }} onClose={() => setViewContent(null)} onNavigate={(idx) => { setViewContent(prev => prev ? { ...prev, moduleIdx: idx } : null); if (viewContent) markModuleViewed(viewContent.resource.id, idx) }} t={t} />
               {resources.length === 0 ? (
                 <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 bg-gray-100">
@@ -500,8 +531,11 @@ export default function Student() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 grid-rows-[1fr]">
                   {resources.map((r) => {
                     const mods = r.modules || []
-                    const totalBlocks = mods.reduce((acc, m) => acc + (m.blocks?.length || 0), 0)
                     const subjIcon = getSubjectIcon(r.subject)
+                    const viewed = progressMap[r.id] || []
+                    const pct = mods.length > 0 ? Math.round((viewed.length / mods.length) * 100) : 0
+                    const status: "start" | "continue" | "finished" = pct === 0 ? "start" : pct >= 100 ? "finished" : "continue"
+                    const btnText = status === "start" ? t("Start") : status === "finished" ? t("Finish") : t("Continue Lesson")
                     return (
                       <ModuleCard
                         key={r.id}
@@ -509,10 +543,10 @@ export default function Student() {
                         subtitle={r.subject}
                         icon={subjIcon.icon}
                         color={`${subjIcon.bg} ${subjIcon.color}`}
-                        lessonsText={`${mods.length} module${mods.length !== 1 ? "s" : ""} • ${totalBlocks} block${totalBlocks !== 1 ? "s" : ""}`}
-                        pct={0}
-                        btnText={t("Start")}
-                        status="start"
+                        lessonsText={`${mods.length} module${mods.length !== 1 ? "s" : ""} • ${viewed.length}/${mods.length} viewed`}
+                        pct={pct}
+                        btnText={btnText}
+                        status={status}
                         onClick={() => setModalResource(r)}
                       />
                     )
@@ -1178,8 +1212,9 @@ function ModuleCard({ title, subtitle, icon, color, lessonsText, pct, btnText, s
   )
 }
 
-function ModuleModal({ resource, onClose, onViewContent, t }: {
+function ModuleModal({ resource, viewedModules, onClose, onViewContent, t }: {
   resource: Resource | null
+  viewedModules: number[]
   onClose: () => void
   onViewContent: (resource: Resource, moduleIdx: number) => void
   t: (text: string) => string
@@ -1187,6 +1222,9 @@ function ModuleModal({ resource, onClose, onViewContent, t }: {
   if (!resource) return null
 
   const mods = resource.modules || []
+  const viewedCount = viewedModules.length
+  const totalMods = mods.length
+  const progressPct = totalMods > 0 ? Math.round((viewedCount / totalMods) * 100) : 0
   const subjIcon = getSubjectIcon(resource.subject)
 
   return (
@@ -1220,6 +1258,22 @@ function ModuleModal({ resource, onClose, onViewContent, t }: {
           </div>
         </div>
 
+        {/* Progress bar */}
+        {totalMods > 0 && (
+          <div className="px-6 pb-4 pt-1">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-medium text-gray-500">{viewedCount} of {totalMods} modules viewed</span>
+              <span className="text-[11px] font-bold text-navy-600">{progressPct}%</span>
+            </div>
+            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${progressPct >= 100 ? "bg-green-500" : progressPct > 0 ? "bg-navy-500" : "bg-gray-300"}`}
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Module list */}
         <div className="p-4 max-h-[55vh] overflow-y-auto">
           {mods.length === 0 ? (
@@ -1235,6 +1289,7 @@ function ModuleModal({ resource, onClose, onViewContent, t }: {
               {mods.map((m, i) => {
                 const blockCount = m.blocks?.length || 0
                 const hasContent = blockCount > 0
+                const isViewed = viewedModules.includes(i)
                 return (
                   <button
                     key={i}
@@ -1242,18 +1297,23 @@ function ModuleModal({ resource, onClose, onViewContent, t }: {
                     className="w-full text-left p-4 rounded-xl border border-gray-100 hover:border-navy-200 hover:bg-navy-50/50 transition-all group"
                   >
                     <div className="flex items-start gap-3.5">
-                      <span className="w-9 h-9 rounded-xl bg-navy-500/10 text-navy-600 flex items-center justify-center text-sm font-bold shrink-0 group-hover:bg-navy-500 group-hover:text-white transition">
-                        {i + 1}
+                      <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 transition ${isViewed ? "bg-green-500 text-white" : "bg-navy-500/10 text-navy-600 group-hover:bg-navy-500 group-hover:text-white"}`}>
+                        {isViewed ? <i className="fas fa-check" /> : i + 1}
                       </span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-semibold text-gray-800 group-hover:text-navy-600 transition truncate">{m.name || `Module ${i + 1}`}</span>
-                          {hasContent && (
+                          {isViewed && (
                             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-green-50 text-green-600 shrink-0">
-                              <i className="fas fa-check-circle mr-0.5" />Has content
+                              <i className="fas fa-check-circle mr-0.5" />Viewed
                             </span>
                           )}
-                          {!hasContent && (
+                          {!isViewed && hasContent && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 shrink-0">
+                              <i className="fas fa-book-open mr-0.5" />New
+                            </span>
+                          )}
+                          {!isViewed && !hasContent && (
                             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 shrink-0">
                               Empty
                             </span>
@@ -1376,8 +1436,8 @@ function ModuleViewer({ data, onBack, onClose, onNavigate, t }: {
               <div className="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-5 bg-gray-100">
                 <i className="fas fa-file-alt text-3xl text-gray-300" />
               </div>
-              <p className="font-semibold text-gray-500 mb-1">No content yet</p>
-              <p className="text-sm text-gray-400">This module is being prepared</p>
+              <p className="font-semibold text-gray-500 mb-1">{t("No content yet")}</p>
+              <p className="text-sm text-gray-400">{t("This module is being prepared")}</p>
             </div>
           ) : (
             <div className="space-y-6">
@@ -1438,7 +1498,7 @@ function ModuleViewer({ data, onBack, onClose, onNavigate, t }: {
               onClick={() => onNavigate(data.moduleIdx - 1)}
               className="px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              <i className="fas fa-chevron-left text-xs" />Previous Module
+              <i className="fas fa-chevron-left text-xs" />{t("Previous Module")}
             </button>
             <span className="text-xs text-gray-400">
               {data.moduleIdx + 1} / {mods.length}
@@ -1448,7 +1508,7 @@ function ModuleViewer({ data, onBack, onClose, onNavigate, t }: {
               onClick={() => onNavigate(data.moduleIdx + 1)}
               className="px-4 py-2.5 text-sm font-medium text-white bg-navy-500 rounded-xl hover:bg-navy-600 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              Next Module<i className="fas fa-chevron-right text-xs" />
+              {t("Next Module")}<i className="fas fa-chevron-right text-xs" />
             </button>
           </div>
         </div>
