@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
+import BlockEditor from "../components/BlockEditor"
 import Sidebar from "../components/Sidebar"
 import TopBar from "../components/TopBar"
 
@@ -9,8 +10,23 @@ import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
 import { assignments } from "../data/assignments"
 import { db } from "../firebase"
-import { collection, getDocs, addDoc } from "firebase/firestore"
-import type { NavItem, Resource } from "../types"
+import { collection, getDocs, addDoc, updateDoc, doc } from "firebase/firestore"
+import type { NavItem, Resource, ModuleContent, ModuleBlock, TableData } from "../types"
+
+function getSubjectIcon(subject: string): { icon: string; color: string; bg: string } {
+  const s = subject.toLowerCase()
+  if (/filipino|wikang|tagalog|pagsulat|komunikasyon/.test(s)) return { icon: "fa-comments", color: "text-red-600", bg: "bg-red-100" }
+  if (/english|grammar|writing|reading|communication|oral|research/.test(s)) return { icon: "fa-language", color: "text-blue-600", bg: "bg-blue-100" }
+  if (/math|algebra|geometry|arithmetic|calculus|pre-calc|basic calc|statistics|business math/.test(s)) return { icon: "fa-calculator", color: "text-emerald-600", bg: "bg-emerald-100" }
+  if (/science|biology|chemistry|physics|earth|life science|physical science/.test(s)) return { icon: "fa-flask", color: "text-purple-600", bg: "bg-purple-100" }
+  if (/history|heograpiya|araling|panlipunan|politics|governance|social science|society|culture/.test(s)) return { icon: "fa-landmark", color: "text-amber-600", bg: "bg-amber-100" }
+  if (/technology|computer|tle|ict|livelihood|empowerment|media and information|disaster|safety/.test(s)) return { icon: "fa-laptop-code", color: "text-cyan-600", bg: "bg-cyan-100" }
+  if (/music|arts|mapeh|mape|contemporary|creative nonfiction|creative writing|humanit/.test(s)) return { icon: "fa-palette", color: "text-pink-600", bg: "bg-pink-100" }
+  if (/physical|pe |sports|health|cookery|tailoring|welding|automotive|home econ|industrial/.test(s)) return { icon: "fa-person-running", color: "text-orange-600", bg: "bg-orange-100" }
+  if (/value|moral|character|citizenship|business ethics|personal dev/.test(s)) return { icon: "fa-heart", color: "text-rose-600", bg: "bg-rose-100" }
+  if (/business|accountancy|management|abm|entrepreneur|organization/.test(s)) return { icon: "fa-briefcase", color: "text-indigo-600", bg: "bg-indigo-100" }
+  return { icon: "fa-book-open", color: "text-navy-600", bg: "bg-navy-100" }
+}
 
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "th-large" },
@@ -66,9 +82,11 @@ export default function Teacher() {
   const [resources, setResources] = useState<Resource[]>([])
   const [resSubject, setResSubject] = useState("")
   const [resTitle, setResTitle] = useState("")
-  const [resFile, setResFile] = useState<File | null>(null)
-  const [resUploading, setResUploading] = useState(false)
-  const [resFileError, setResFileError] = useState("")
+  const [resDesc, setResDesc] = useState("")
+  const [resModules, setResModules] = useState<ModuleContent[]>([{ name: "", description: "", blocks: [] }])
+  const [resSaving, setResSaving] = useState(false)
+  const [previewResource, setPreviewResource] = useState<Resource | null>(null)
+  const [editingResourceId, setEditingResourceId] = useState<string | null>(null)
   const isDark = theme === "dark"
 
   const mockStudentWork: Record<string, string> = {
@@ -97,7 +115,31 @@ export default function Teacher() {
   useEffect(() => {
     const fetchResources = async () => {
       const snap = await getDocs(collection(db, "resources"))
-      const items: Resource[] = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Resource))
+      const items: Resource[] = snap.docs.map((d) => {
+        const data = d.data() as Resource
+        return {
+          id: d.id,
+          ...data,
+          modules: (data.modules || []).map((m: any) => {
+            if (m.blocks) {
+              return { ...m, blocks: m.blocks.map((b: any) => ({ id: b.id, type: b.type, topic: b.topic, description: b.description, imageData: b.imageData })) }
+            }
+            const blocks: ModuleBlock[] = []
+            if (m.content) blocks.push({ id: `mig_${d.id}_c`, type: "content", topic: "", description: m.content })
+            if (m.images) (m.images as string[]).forEach((img, i) => blocks.push({ id: `mig_${d.id}_img_${i}`, type: "image", topic: "", description: "", imageData: img }))
+            if (m.tables) {
+              const tables = typeof m.tables === "string" ? JSON.parse(m.tables) : (m.tables || [])
+              tables.forEach((t: TableData, i: number) => {
+                let html = "<table><tbody>"
+                t.cells.forEach(row => { html += "<tr>" + row.map(cell => `<td style="text-align:${t.textAlign || "left"}">${cell}</td>`).join("") + "</tr>" })
+                html += "</tbody></table>"
+                blocks.push({ id: `mig_${d.id}_tbl_${i}`, type: "table", topic: "", description: html })
+              })
+            }
+            return { name: m.name || "", description: m.description || "", blocks }
+          }),
+        }
+      })
       setResources(items)
     }
     fetchResources()
@@ -141,58 +183,79 @@ export default function Teacher() {
   }, [profile?.uid])
 
   const handleResourceUpload = async () => {
-    if (!resSubject.trim() || !resTitle.trim() || !resFile) return
-    setResUploading(true)
-    setResFileError("")
+    if (!resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0)) return
+    setResSaving(true)
     try {
-      const formData = new FormData()
-      formData.append("file", resFile)
-      const res = await fetch("http://localhost:3001/api/upload", { method: "POST", body: formData })
-      if (!res.ok) throw new Error("Upload failed")
-      const data = await res.json()
-      const docRef = await addDoc(collection(db, "resources"), {
+      const filteredModules = resModules.filter(m => m.name.trim() || m.blocks.length > 0)
+      const firestoreModules = filteredModules.map(m => ({
+        ...m,
+        blocks: m.blocks.map(b => {
+          const clean: Record<string, any> = { id: b.id, type: b.type, topic: b.topic, description: b.description }
+          if (b.type === "image" && b.imageData) clean.imageData = b.imageData
+          return clean
+        }),
+      }))
+      const payload = {
         subject: resSubject.trim(),
         title: resTitle.trim(),
-        fileName: data.fileName,
-        fileUrl: data.fileUrl,
-        fileType: data.fileType,
-        fileSize: data.fileSize,
-        uploadedBy: profile?.displayName || "Teacher",
-        uploadedAt: new Date().toISOString(),
-      })
-      setResources((prev) => [...prev, {
-        id: docRef.id,
-        subject: resSubject.trim(),
-        title: resTitle.trim(),
-        fileName: data.fileName,
-        fileUrl: data.fileUrl,
-        fileType: data.fileType,
-        fileSize: data.fileSize,
-        uploadedBy: profile?.displayName || "Teacher",
-        uploadedAt: new Date().toISOString(),
-      }])
-      setResSubject("")
-      setResTitle("")
-      setResFile(null)
-      setResourceUploadOpen(false)
-    } catch {
-      setResFileError("Upload failed. Make sure the server is running (npm run server).")
+        description: resDesc.trim(),
+        modules: firestoreModules,
+      }
+      if (editingResourceId) {
+        await updateDoc(doc(db, "resources", editingResourceId), payload)
+        setResources((prev) => prev.map(r => r.id === editingResourceId ? { ...r, ...payload, modules: filteredModules } : r))
+      } else {
+        const docRef = await addDoc(collection(db, "resources"), {
+          ...payload,
+          uploadedBy: profile?.displayName || "Teacher",
+          uploadedAt: new Date().toISOString(),
+        })
+        setResources((prev) => [...prev, {
+          id: docRef.id,
+          ...payload,
+          modules: filteredModules,
+          uploadedBy: profile?.displayName || "Teacher",
+          uploadedAt: new Date().toISOString(),
+        }])
+      }
+      resetResourceForm()
+    } catch (err) {
+      console.error("Failed to save resource:", err)
     } finally {
-      setResUploading(false)
+      setResSaving(false)
     }
   }
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  const addModule = () => {
+    setResModules((prev) => [...prev, { name: "", description: "", blocks: [] }])
   }
 
-  const getFileIcon = (fileType: string) => {
-    if (fileType.includes("pdf")) return { icon: "fa-file-pdf", color: "bg-red-100 text-red-600" }
-    if (fileType.includes("word") || fileType.includes("docx") || fileType.includes("doc")) return { icon: "fa-file-word", color: "bg-blue-100 text-blue-600" }
-    return { icon: "fa-file", color: "bg-gray-100 text-gray-600" }
+  const removeModule = (index: number) => {
+    setResModules((prev) => prev.filter((_, i) => i !== index))
   }
+
+  const updateModule = (index: number, updated: ModuleContent) => {
+    setResModules((prev) => prev.map((m, i) => i === index ? updated : m))
+  }
+
+  const openEditResource = (resource: Resource) => {
+    setEditingResourceId(resource.id)
+    setResSubject(resource.subject)
+    setResTitle(resource.title)
+    setResDesc(resource.description)
+    setResModules(resource.modules.length > 0 ? resource.modules.map(m => ({ ...m })) : [{ name: "", description: "", blocks: [] }])
+    setResourceUploadOpen(true)
+  }
+
+  const resetResourceForm = () => {
+    setEditingResourceId(null)
+    setResSubject("")
+    setResTitle("")
+    setResDesc("")
+    setResModules([{ name: "", description: "", blocks: [] }])
+    setResourceUploadOpen(false)
+  }
+
 
   const goTo = (page: string) => {
     setActivePage(page)
@@ -228,6 +291,18 @@ export default function Teacher() {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      <style>{`
+        .tiptap-preview img { max-width: 100%; border-radius: 8px; margin: 0.5rem 0; }
+        .tiptap-preview img[data-float="left"] { float: left; margin: 0.25rem 1rem 0.5rem 0; max-width: 50%; }
+        .tiptap-preview img[data-float="right"] { float: right; margin: 0.25rem 0 0.5rem 1rem; max-width: 50%; }
+        .tiptap-preview table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+        .tiptap-preview td, .tiptap-preview th { border: 1px solid #d1d5db; padding: 0.5rem; }
+        .tiptap-preview th { background: #f3f4f6; font-weight: 600; }
+        .tiptap-preview ul { list-style-type: disc; padding-left: 1.5rem; }
+        .tiptap-preview ol { list-style-type: decimal; padding-left: 1.5rem; }
+        .tiptap-preview blockquote { border-left: 3px solid #d1d5db; padding-left: 0.75rem; color: #6b7280; font-style: italic; }
+        .tiptap-preview a { color: #2563eb; text-decoration: underline; }
+      `}</style>
       <Sidebar title="ALS Learning" subtitle="Teacher Portal" items={navItems} activePage={activePage} onNavigate={goTo} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
 
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -751,58 +826,62 @@ export default function Teacher() {
               <div className="flex items-start justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-800">Teaching Resources</h2>
-                  <p className="text-gray-500 mt-1">Browse and manage your teaching materials</p>
+                  <p className="text-gray-500 mt-1">Create and manage your module content</p>
                 </div>
                 <button onClick={() => setResourceUploadOpen(true)} className="px-4 py-2 bg-navy-500 text-white text-sm font-medium rounded-lg hover:bg-navy-600 transition flex items-center gap-2">
-                  <i className="fas fa-upload text-xs" /> Upload
+                  <i className="fas fa-plus text-xs" /> Create Module
                 </button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {[
-                  { title: "English — Grammar & Composition", desc: "Modules on sentence structure, essay writing, and oral communication", meta: "Updated May 2026 • 3.2 MB", icon: "fa-book-open", color: "bg-blue-100 text-blue-600" },
-                  { title: "Mathematics — Algebra & Geometry", desc: "Lessons on linear equations, quadratic functions, and geometric proofs", meta: "Updated May 2026 • 4.1 MB", icon: "fa-square-root-variable", color: "bg-green-100 text-green-600" },
-                  { title: "Science — Earth & Life Science", desc: "Topics on ecology, cell biology, geology, and weather systems", meta: "Updated April 2026 • 5.7 MB", icon: "fa-flask", color: "bg-purple-100 text-purple-600" },
-                  { title: "Filipino — Wika at Panitikan", desc: "Mga modyul sa gramatika, pagbasa, at panitikang Pilipino", meta: "Updated May 2026 • 2.8 MB", icon: "fa-language", color: "bg-amber-100 text-amber-600" },
-                  { title: "Araling Panlipunan — Kasaysayan", desc: "Modules on Philippine history, governance, and global geography", meta: "Updated May 2026 • 6.3 MB", icon: "fa-globe-asia", color: "bg-red-100 text-red-600" },
-                  { title: "MAPEH — Physical Education & Health", desc: "Exercise routines, nutrition guides, and sports fundamentals", meta: "Updated April 2026 • 8.9 MB", icon: "fa-running", color: "bg-teal-100 text-teal-600" },
-                  { title: "Values Education — GMRC", desc: "Good manners, values integration, and character development", meta: "Updated May 2026 • 1.5 MB", icon: "fa-hand-holding-heart", color: "bg-pink-100 text-pink-600" },
-                  { title: "TLE — ICT & Entrepreneurship", desc: "Computer literacy, coding basics, and small business concepts", meta: "Updated April 2026 • 12.5 MB", icon: "fa-laptop-code", color: "bg-indigo-100 text-indigo-600" }
-                ].map((r) => (
-                  <div key={r.title} className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <div className="flex items-center gap-4 mb-3">
-                      <div className={`w-12 h-12 rounded-lg ${r.color} flex items-center justify-center`}>
-                        <i className={`fas ${r.icon} text-xl`} />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-800">{r.title}</h3>
-                        <p className="text-xs text-gray-400">{r.meta}</p>
-                      </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 grid-rows-[1fr]">
+                {resources.length === 0 && (
+                  <div className={`col-span-2 text-center py-20 rounded-xl border-2 border-dashed ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 ${isDark ? "bg-gray-800" : "bg-gray-100"}`}>
+                      <i className={`fas fa-folder-open text-2xl ${isDark ? "text-gray-600" : "text-gray-300"}`} />
                     </div>
-                    <p className="text-sm text-gray-600 mb-3">{r.desc}</p>
-                    <div className="flex items-center justify-between mt-2">
-                      <button className="text-primary text-sm font-medium hover:text-primary-700 transition"><i className="fas fa-eye mr-1" /> Preview</button>
-                      <i className="fas fa-download text-gray-400 hover:text-gray-600 cursor-pointer" />
-                    </div>
+                    <p className={`font-medium mb-1 ${isDark ? "text-gray-400" : "text-gray-500"}`}>No resources yet</p>
+                    <p className={`text-sm ${isDark ? "text-gray-600" : "text-gray-400"}`}>Click "Create Module" to get started</p>
                   </div>
-                ))}
+                )}
                 {resources.map((r) => {
-                  const fi = getFileIcon(r.fileType)
+                  const date = new Date(r.uploadedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                  const mods = r.modules || []
+                  const blockCounts = { content: 0, image: 0, table: 0 }
+                  mods.forEach(m => (m.blocks || []).forEach(b => { if (b.type in blockCounts) blockCounts[b.type as keyof typeof blockCounts]++ }))
+                  const subjIcon = getSubjectIcon(r.subject)
                   return (
-                    <div key={r.id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                      <div className="flex items-center gap-4 mb-3">
-                        <div className={`w-12 h-12 rounded-lg ${fi.color} flex items-center justify-center`}>
-                          <i className={`fas ${fi.icon} text-xl`} />
+                    <div key={r.id} className={`group rounded-2xl shadow-md overflow-hidden transition-all hover:shadow-lg hover:-translate-y-0.5 h-full flex flex-col ${isDark ? "bg-gray-800" : "bg-white"}`}>
+                      <div className={`p-6 flex-1 flex flex-col ${isDark ? "bg-gradient-to-br from-navy-500/10 to-transparent" : "bg-gradient-to-br from-navy-50 to-transparent"}`}>
+                        <div className="flex items-start gap-4 mb-4">
+                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${isDark ? "bg-navy-400/20 text-navy-400" : `${subjIcon.bg} ${subjIcon.color}`}`}>
+                            <i className={`fas ${subjIcon.icon} text-xl`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className={`font-bold text-lg truncate ${isDark ? "text-white" : "text-gray-800"}`}>{r.title}</h3>
+                            <p className={`text-sm mt-0.5 ${isDark ? "text-gray-500" : "text-gray-400"}`}>{r.subject}</p>
+                          </div>
                         </div>
-                        <div>
-                          <h3 className="font-semibold text-gray-800">{r.title}</h3>
-                          <p className="text-xs text-gray-400">{r.subject} • {formatFileSize(r.fileSize)}</p>
+                        {r.description && <p className={`text-sm mb-4 leading-relaxed ${isDark ? "text-gray-400" : "text-gray-500"}`}>{r.description}</p>}
+                        <div className={`flex items-center gap-3 text-xs mb-4 ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                          <span className="flex items-center gap-1.5"><i className="fas fa-user-circle" />{r.uploadedBy}</span>
+                          <span className={`w-1 h-1 rounded-full ${isDark ? "bg-gray-600" : "bg-gray-300"}`} />
+                          <span className="flex items-center gap-1.5"><i className="fas fa-calendar-alt" />{date}</span>
                         </div>
-                      </div>
-                      <p className="text-sm text-gray-600 mb-1">{r.fileName}</p>
-                      <p className="text-xs text-gray-400 mb-3">Uploaded by {r.uploadedBy}</p>
-                      <div className="flex items-center justify-between mt-2">
-                        <a href={r.fileUrl} target="_blank" rel="noopener noreferrer" className="text-primary text-sm font-medium hover:text-primary-700 transition"><i className="fas fa-eye mr-1" /> Preview</a>
-                        <a href={r.fileUrl} download={r.fileName} className="text-gray-400 hover:text-gray-600"><i className="fas fa-download" /></a>
+                        <div className="flex items-center gap-2 mb-5 flex-wrap">
+                          <span className={`text-xs font-semibold px-3 py-1 rounded-full ${isDark ? "bg-gray-700 text-gray-300" : "bg-gray-100 text-gray-600"}`}>
+                            <i className="fas fa-layer-group mr-1.5" />{mods.length} module{mods.length !== 1 ? "s" : ""}
+                          </span>
+                          {blockCounts.content > 0 && <span className="text-xs font-semibold px-3 py-1 rounded-full bg-blue-50 text-blue-600"><i className="fas fa-align-left mr-1.5" />{blockCounts.content}</span>}
+                          {blockCounts.image > 0 && <span className="text-xs font-semibold px-3 py-1 rounded-full bg-green-50 text-green-600"><i className="fas fa-image mr-1.5" />{blockCounts.image}</span>}
+                          {blockCounts.table > 0 && <span className="text-xs font-semibold px-3 py-1 rounded-full bg-purple-50 text-purple-600"><i className="fas fa-table mr-1.5" />{blockCounts.table}</span>}
+                        </div>
+                        <div className="flex items-center gap-3 mt-auto">
+                          <button onClick={() => setPreviewResource(r)} className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 ${isDark ? "bg-navy-500/20 text-navy-400 hover:bg-navy-500/30" : "bg-navy-50 text-navy-600 hover:bg-navy-100"}`}>
+                            <i className="fas fa-eye" /> Preview
+                          </button>
+                          <button onClick={() => openEditResource(r)} className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 ${isDark ? "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20" : "bg-amber-50 text-amber-600 hover:bg-amber-100"}`}>
+                            <i className="fas fa-edit" /> Edit
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )
@@ -1190,83 +1269,67 @@ export default function Teacher() {
         </div>
       )}
 
-      {/* Upload Resource Modal */}
+      {/* Create/Edit Module Content Modal */}
       {resourceUploadOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { if (!resUploading) { setResourceUploadOpen(false); setResFile(null); setResFileError(""); } }}>
-          <div className="bg-white rounded-2xl shadow-xl p-7 w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-lg font-bold text-gray-800">Upload Resource</h3>
-              {!resUploading && (
-                <button onClick={() => { setResourceUploadOpen(false); setResFile(null); setResFileError(""); }} className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition">
-                  <i className="fas fa-times text-gray-500 text-sm" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { if (!resSaving) resetResourceForm() }}>
+          <div className={`rounded-2xl shadow-xl p-7 w-full max-w-4xl mx-4 max-h-[90vh] flex flex-col ${isDark ? "bg-gray-900" : "bg-white"}`} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5 shrink-0">
+              <h3 className={`text-lg font-bold ${isDark ? "text-white" : "text-gray-800"}`}>{editingResourceId ? "Edit Module Content" : "Create Module Content"}</h3>
+              {!resSaving && (
+                <button onClick={resetResourceForm} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${isDark ? "bg-gray-800 hover:bg-gray-700" : "bg-gray-100 hover:bg-gray-200"}`}>
+                  <i className={`fas fa-times text-sm ${isDark ? "text-gray-400" : "text-gray-500"}`} />
                 </button>
               )}
             </div>
-            <div className="space-y-4">
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-1.5 block">Subject</label>
-                <input type="text" value={resSubject} onChange={(e) => setResSubject(e.target.value)} placeholder="e.g. English — Grammar & Composition" disabled={resUploading}
-                  className="w-full p-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50" />
+                <label className={`text-sm font-medium mb-1.5 block ${isDark ? "text-gray-300" : "text-gray-700"}`}>Subject</label>
+                <input type="text" value={resSubject} onChange={(e) => setResSubject(e.target.value)} placeholder="e.g. English — Grammar & Composition" disabled={resSaving}
+                  className={`w-full p-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50 ${isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "border-gray-200"}`} />
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-1.5 block">Title</label>
-                <input type="text" value={resTitle} onChange={(e) => setResTitle(e.target.value)} placeholder="e.g. Module 1: Sentence Structure" disabled={resUploading}
-                  className="w-full p-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50" />
+                <label className={`text-sm font-medium mb-1.5 block ${isDark ? "text-gray-300" : "text-gray-700"}`}>Title</label>
+                <input type="text" value={resTitle} onChange={(e) => setResTitle(e.target.value)} placeholder="e.g. Module 1: Sentence Structure" disabled={resSaving}
+                  className={`w-full p-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50 ${isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "border-gray-200"}`} />
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-1.5 block">File</label>
-                <div className={`border-2 border-dashed rounded-xl p-6 text-center transition ${resFile ? "border-green-300 bg-green-50/50" : "border-gray-200 hover:border-navy-500/50"}`}>
-                  <input type="file" accept=".pdf,.docx,.doc" className="hidden" id="fileInput"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] || null
-                      setResFileError("")
-                      if (file) {
-                        const ext = file.name.split(".").pop()?.toLowerCase()
-                        if (ext !== "pdf" && ext !== "docx" && ext !== "doc") {
-                          setResFileError("Only PDF and DOCX files are allowed.")
-                          setResFile(null)
-                          e.target.value = ""
-                          return
-                        }
-                        setResFile(file)
-                      } else {
-                        setResFile(null)
-                      }
-                    }} />
-                  {resFile ? (
-                    <div className="flex flex-col items-center">
-                      <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mb-3">
-                        <i className={`fas ${resFile.type.includes("pdf") ? "fa-file-pdf" : "fa-file-word"} text-green-600 text-xl`} />
-                      </div>
-                      <p className="text-sm font-medium text-gray-700">{resFile.name}</p>
-                      <p className="text-xs text-gray-400 mt-1">{formatFileSize(resFile.size)}</p>
-                      {!resUploading && (
-                        <button onClick={() => { setResFile(null); const input = document.getElementById("fileInput") as HTMLInputElement; if (input) input.value = "" }}
-                          className="mt-2 text-xs text-red-500 hover:text-red-600 font-medium">Remove file</button>
-                      )}
-                    </div>
-                  ) : (
-                    <label htmlFor="fileInput" className="cursor-pointer">
-                      <div className="w-12 h-12 rounded-full bg-navy-100 flex items-center justify-center mx-auto mb-3">
-                        <i className="fas fa-cloud-upload-alt text-navy-500 text-xl" />
-                      </div>
-                      <p className="text-sm font-medium text-gray-700">Click to browse files</p>
-                      <p className="text-xs text-gray-400 mt-1">Supports PDF and DOCX only</p>
-                    </label>
-                  )}
+                <label className={`text-sm font-medium mb-1.5 block ${isDark ? "text-gray-300" : "text-gray-700"}`}>Description</label>
+                <textarea value={resDesc} onChange={(e) => setResDesc(e.target.value)} rows={3} placeholder="Brief description of this resource..." disabled={resSaving}
+                  className={`w-full p-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50 resize-none ${isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "border-gray-200"}`} />
+              </div>
+
+              <div>
+                <label className={`text-sm font-medium mb-2 block ${isDark ? "text-gray-300" : "text-gray-700"}`}>Modules</label>
+                <div className="space-y-6">
+                  {resModules.map((mod, idx) => (
+                    <BlockEditor
+                      key={idx}
+                      module={mod}
+                      index={idx}
+                      moduleCount={resModules.length}
+                      onChange={(updated) => updateModule(idx, updated)}
+                      onRemove={() => removeModule(idx)}
+                      isDark={isDark}
+                    />
+                  ))}
                 </div>
-                {resFileError && <p className="text-red-500 text-xs mt-1.5">{resFileError}</p>}
+                {!resSaving && (
+                  <button onClick={addModule}
+                    className={`mt-3 w-full py-2.5 rounded-xl border-2 border-dashed text-sm font-medium transition flex items-center justify-center gap-2 ${isDark ? "border-gray-700 text-gray-400 hover:border-navy-500 hover:text-navy-400" : "border-gray-300 text-gray-500 hover:border-navy-500 hover:text-navy-600"}`}>
+                    <i className="fas fa-plus text-xs" /> Add Module
+                  </button>
+                )}
               </div>
             </div>
-            <div className="flex gap-3 mt-6">
-              {!resUploading && (
-                <button onClick={() => { setResourceUploadOpen(false); setResFile(null); setResFileError(""); }} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
+            <div className="flex gap-3 mt-5 shrink-0">
+              {!resSaving && (
+                <button onClick={resetResourceForm} className={`flex-1 py-2.5 rounded-xl border text-sm font-medium transition ${isDark ? "border-gray-700 text-gray-300 hover:bg-gray-800" : "border-gray-200 text-gray-700 hover:bg-gray-50"}`}>
                   Cancel
                 </button>
               )}
-              <button onClick={handleResourceUpload} disabled={resUploading || !resSubject.trim() || !resTitle.trim() || !resFile}
+              <button onClick={handleResourceUpload} disabled={resSaving || !resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0)}
                 className="flex-1 py-2.5 rounded-xl bg-navy-500 text-white text-sm font-medium hover:bg-navy-600 transition flex items-center justify-center gap-2 disabled:opacity-70">
-                {resUploading ? <><i className="fas fa-spinner fa-spin text-xs" /> Uploading...</> : <><i className="fas fa-upload text-xs" /> Upload</>}
+                {resSaving ? <><i className="fas fa-spinner fa-spin text-xs" /> Saving...</> : <><i className="fas fa-save text-xs" /> {editingResourceId ? "Update" : "Save"}</>}
               </button>
             </div>
           </div>
@@ -1390,6 +1453,118 @@ export default function Teacher() {
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Resource Preview Modal */}
+      {previewResource && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setPreviewResource(null)}>
+          <div className={`rounded-2xl shadow-2xl w-full max-w-5xl mx-4 max-h-[92vh] flex overflow-hidden ${isDark ? "bg-gray-900" : "bg-white"}`} onClick={(e) => e.stopPropagation()}>
+            {/* Sidebar */}
+            <div className={`w-64 shrink-0 flex flex-col border-r ${isDark ? "bg-gray-950 border-gray-800" : "bg-gray-50 border-gray-200"}`}>
+              <div className={`p-5 border-b ${isDark ? "border-gray-800" : "border-gray-200"}`}>
+                <h3 className={`text-sm font-bold leading-tight ${isDark ? "text-white" : "text-gray-800"}`}>{previewResource.title}</h3>
+                <p className={`text-xs mt-1 ${isDark ? "text-gray-500" : "text-gray-400"}`}>{previewResource.subject}</p>
+                <div className={`flex items-center gap-1.5 mt-3 text-[11px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                  <i className="fas fa-user-circle" />
+                  <span>{previewResource.uploadedBy}</span>
+                  <span>&bull;</span>
+                  <span>{new Date(previewResource.uploadedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 space-y-1">
+                <p className={`text-[10px] font-semibold uppercase tracking-wider px-2 mb-2 ${isDark ? "text-gray-600" : "text-gray-400"}`}>Modules</p>
+                {(previewResource.modules || []).map((mod, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      document.getElementById(`preview-mod-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    }}
+                    className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition flex items-center gap-2.5 ${isDark ? "hover:bg-gray-800 text-gray-400 hover:text-gray-200" : "hover:bg-gray-100 text-gray-600 hover:text-gray-800"}`}
+                  >
+                    <span className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0 ${isDark ? "bg-gray-800 text-gray-400" : "bg-gray-200 text-gray-500"}`}>
+                      {idx + 1}
+                    </span>
+                    <span className="truncate">{mod.name || `Module ${idx + 1}`}</span>
+                  </button>
+                ))}
+              </div>
+              <div className={`p-4 border-t ${isDark ? "border-gray-800" : "border-gray-200"}`}>
+                <div className={`flex items-center gap-3 text-[11px] ${isDark ? "text-gray-600" : "text-gray-400"}`}>
+                  <span><i className="fas fa-layer-group mr-1" />{(previewResource.modules || []).length} modules</span>
+                  <span><i className="fas fa-th-large mr-1"/>{(previewResource.modules || []).reduce((acc, m) => acc + (m.blocks?.length || 0), 0)} blocks</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Main content */}
+            <div className="flex-1 flex flex-col min-w-0">
+              <div className={`p-5 border-b flex items-center justify-between shrink-0 ${isDark ? "border-gray-800" : "border-gray-200"}`}>
+                <div className="min-w-0">
+                  <h2 className={`text-lg font-bold truncate ${isDark ? "text-white" : "text-gray-800"}`}>{previewResource.title}</h2>
+                  {previewResource.description && (
+                    <p className={`text-sm mt-1 ${isDark ? "text-gray-400" : "text-gray-500"}`}>{previewResource.description}</p>
+                  )}
+                </div>
+                <button onClick={() => setPreviewResource(null)} className={`ml-4 w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition ${isDark ? "bg-gray-800 hover:bg-gray-700 text-gray-400" : "bg-gray-100 hover:bg-gray-200 text-gray-500"}`}>
+                  <i className="fas fa-times text-sm" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                {(previewResource.modules || []).map((mod, modIdx) => (
+                  <div key={modIdx} id={`preview-mod-${modIdx}`} className="scroll-mt-6">
+                    {/* Module header */}
+                    <div className={`rounded-xl p-5 mb-4 ${isDark ? "bg-gray-800/60" : "bg-gradient-to-r from-navy-500/5 to-transparent border border-navy-500/10"}`}>
+                      <div className="flex items-center gap-3">
+                        <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${isDark ? "bg-navy-500/20 text-navy-400" : "bg-navy-500 text-white"}`}>
+                          {modIdx + 1}
+                        </span>
+                        <div>
+                          <h3 className={`text-base font-bold ${isDark ? "text-white" : "text-gray-800"}`}>{mod.name || `Module ${modIdx + 1}`}</h3>
+                          {mod.description && <p className={`text-sm mt-0.5 ${isDark ? "text-gray-400" : "text-gray-500"}`}>{mod.description}</p>}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Blocks */}
+                    {(!mod.blocks || mod.blocks.length === 0) && (
+                      <p className={`text-sm italic pl-4 ${isDark ? "text-gray-600" : "text-gray-400"}`}>No content</p>
+                    )}
+                    <div className="space-y-5">
+                      {mod.blocks && mod.blocks.map((block, blockIdx) => (
+                        <div key={block.id} className={`rounded-xl border p-5 ${isDark ? "bg-gray-800/30 border-gray-800" : "bg-white border-gray-100 shadow-sm"}`}>
+                          {block.topic && (
+                            <h4 className={`text-sm font-bold mb-2 flex items-center gap-2 ${isDark ? "text-gray-200" : "text-gray-700"}`}>
+                              {block.type === "content" && <i className="fas fa-align-left text-blue-500 text-[10px]" />}
+                              {block.type === "image" && <i className="fas fa-image text-green-500 text-[10px]" />}
+                              {block.type === "table" && <i className="fas fa-table text-purple-500 text-[10px]" />}
+                              {block.topic}
+                            </h4>
+                          )}
+                          {block.description && (
+                            <div
+                              className={`tiptap-preview prose prose-sm max-w-none ${isDark ? "prose-invert" : ""}`}
+                              dangerouslySetInnerHTML={{ __html: block.description }}
+                            />
+                          )}
+                          {block.type === "image" && block.imageData && (
+                            <div className="mt-3">
+                              <img src={block.imageData} alt="" className="max-w-full max-h-80 rounded-lg border object-contain" />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {modIdx < (previewResource.modules || []).length - 1 && (
+                      <div className={`mt-8 border-b ${isDark ? "border-gray-800" : "border-gray-100"}`} />
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

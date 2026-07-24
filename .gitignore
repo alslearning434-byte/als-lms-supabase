@@ -25,3 +25,7 @@ teacher-credentials.txt
 *.njsproj
 *.sln
 *.sw?
+
+# Temp / scratch
+PLAN.md
+nul
