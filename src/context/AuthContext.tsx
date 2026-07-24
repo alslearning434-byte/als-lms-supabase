@@ -92,27 +92,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const cred = await signInWithEmailAndPassword(auth, creds.email, creds.password)
           setUser(cred.user)
           currentEmail.current = cred.user.email
-          const snap = await getDoc(doc(db, "users", cred.user.uid))
-          if (snap.exists()) {
-            setProfile(snap.data() as UserProfile)
-          }
+          try {
+            const snap = await getDoc(doc(db, "users", cred.user.uid))
+            if (snap.exists()) {
+              setProfile(snap.data() as UserProfile)
+            }
+          } catch { /* offline */ }
         } catch {
           clearCreds()
           setUser(firebaseUser)
           currentEmail.current = firebaseUser.email
-          const snap = await getDoc(doc(db, "users", firebaseUser.uid))
-          if (snap.exists()) {
-            setProfile(snap.data() as UserProfile)
-          }
+          try {
+            const snap = await getDoc(doc(db, "users", firebaseUser.uid))
+            if (snap.exists()) {
+              setProfile(snap.data() as UserProfile)
+            }
+          } catch { /* offline */ }
         }
       } else {
         setUser(firebaseUser)
         if (firebaseUser) {
           currentEmail.current = firebaseUser.email
-          const snap = await getDoc(doc(db, "users", firebaseUser.uid))
-          if (snap.exists()) {
-            setProfile(snap.data() as UserProfile)
-          }
+          try {
+            const snap = await getDoc(doc(db, "users", firebaseUser.uid))
+            if (snap.exists()) {
+              setProfile(snap.data() as UserProfile)
+            }
+          } catch { /* offline */ }
         }
       }
 

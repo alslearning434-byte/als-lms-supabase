@@ -7,7 +7,9 @@ import LogoutModal from "../components/LogoutModal"
 import ChangePasswordModal from "../components/ChangePasswordModal"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
-import type { NavItem } from "../types"
+import { db } from "../firebase"
+import { collection, getDocs } from "firebase/firestore"
+import type { NavItem, Resource } from "../types"
 
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "th-large" },
@@ -18,6 +20,21 @@ const navItems: NavItem[] = [
   { id: "calendar", label: "Calendar", icon: "calendar-alt" },
   { id: "profile", label: "Profile", icon: "user-circle" }
 ]
+
+function getSubjectIcon(subject: string): { icon: string; color: string; bg: string } {
+  const s = subject.toLowerCase()
+  if (/filipino|wikang|tagalog|pagsulat|komunikasyon/.test(s)) return { icon: "fa-comments", color: "text-red-600", bg: "bg-red-100" }
+  if (/english|grammar|writing|reading|communication|oral|research/.test(s)) return { icon: "fa-language", color: "text-blue-600", bg: "bg-blue-100" }
+  if (/math|algebra|geometry|arithmetic|calculus|pre-calc|basic calc|statistics|business math/.test(s)) return { icon: "fa-calculator", color: "text-emerald-600", bg: "bg-emerald-100" }
+  if (/science|biology|chemistry|physics|earth|life science|physical science/.test(s)) return { icon: "fa-flask", color: "text-purple-600", bg: "bg-purple-100" }
+  if (/history|heograpiya|araling|panlipunan|politics|governance|social science|society|culture/.test(s)) return { icon: "fa-landmark", color: "text-amber-600", bg: "bg-amber-100" }
+  if (/technology|computer|tle|ict|livelihood|empowerment|media and information|disaster|safety/.test(s)) return { icon: "fa-laptop-code", color: "text-cyan-600", bg: "bg-cyan-100" }
+  if (/music|arts|mapeh|mape|contemporary|creative nonfiction|creative writing|humanit/.test(s)) return { icon: "fa-palette", color: "text-pink-600", bg: "bg-pink-100" }
+  if (/physical|pe |sports|health|cookery|tailoring|welding|automotive|home econ|industrial/.test(s)) return { icon: "fa-person-running", color: "text-orange-600", bg: "bg-orange-100" }
+  if (/value|moral|character|citizenship|business ethics|personal dev/.test(s)) return { icon: "fa-heart", color: "text-rose-600", bg: "bg-rose-100" }
+  if (/business|accountancy|management|abm|entrepreneur|organization/.test(s)) return { icon: "fa-briefcase", color: "text-indigo-600", bg: "bg-indigo-100" }
+  return { icon: "fa-book-open", color: "text-navy-600", bg: "bg-navy-100" }
+}
 
 export default function Student() {
   const navigate = useNavigate()
@@ -31,13 +48,15 @@ export default function Student() {
   const [deadlinesExpanded, setDeadlinesExpanded] = useState(false)
   const [progressExpanded, setProgressExpanded] = useState(false)
   const [badgesExpanded, setBadgesExpanded] = useState(false)
-  const [moduleModal, setModuleModal] = useState<{ title: string; type: "start" | "continue" | "finished" } | null>(null)
   const [language, setLanguage] = useState<"en" | "tl">("en")
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null)
   const [submissionOpen, setSubmissionOpen] = useState<string | null>(null)
   const [submittedIds, setSubmittedIds] = useState<Set<string>>(new Set(["sci-lab-report"]))
   const [submissionFile, setSubmissionFile] = useState<File | null>(null)
   const [submissionNote, setSubmissionNote] = useState("")
+  const [resources, setResources] = useState<Resource[]>([])
+  const [modalResource, setModalResource] = useState<Resource | null>(null)
+  const [viewContent, setViewContent] = useState<{ resource: Resource; moduleIdx: number } | null>(null)
 
   const t = (text: string): string => {
     if (language !== "tl") return text
@@ -226,6 +245,29 @@ export default function Student() {
   }
 
   const isDark = theme === "dark"
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, "resources"))
+        const fetched: Resource[] = snap.docs.map((d) => {
+          const data = d.data()
+          return {
+            id: d.id,
+            subject: data.subject || "",
+            title: data.title || "",
+            description: data.description || "",
+            modules: data.modules || [],
+            uploadedBy: data.uploadedBy || "",
+            uploadedAt: data.uploadedAt || "",
+          }
+        })
+        setResources(fetched)
+      } catch (err) {
+        console.error("Failed to fetch resources:", err)
+      }
+    })()
+  }, [])
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -444,22 +486,39 @@ export default function Student() {
             <div>
               <h2 className="text-2xl font-bold text-gray-800">{t("My Modules")}</h2>
               <p className="text-gray-500 mt-1 mb-6">{t("Access your learning materials and lessons")}</p>
-              <ModuleModal data={moduleModal} onClose={() => setModuleModal(null)} t={t} />
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {[
-                  { title: "Mathematical Reasoning", icon: "fa-calculator", color: "bg-purple-100 text-purple-600", lessons: t("10 lessons • 60% complete"), pct: 60, bar: "bg-purple-500", btn: t("Continue Lesson"), status: "continue" as const },
-                  { title: "Life & Career Skills", icon: "fa-briefcase", color: "bg-rose-100 text-rose-600", lessons: t("6 lessons • 30% complete"), pct: 30, bar: "bg-rose-500", btn: t("Continue Lesson"), status: "continue" as const },
-                  { title: "English Language", icon: "fa-globe", color: "bg-teal-100 text-teal-600", lessons: t("14 lessons • 0% complete"), pct: 0, bar: "bg-gray-300", btn: t("Start"), status: "start" as const },
-                  { title: "Digital Literacy", icon: "fa-laptop-code", color: "bg-orange-100 text-orange-600", lessons: t("9 lessons • 0% complete"), pct: 0, bar: "bg-gray-300", btn: t("Start"), status: "start" as const },
-                  { title: "Humanities & Social Sciences", icon: "fa-book", color: "bg-indigo-100 text-indigo-600", lessons: t("10 lessons • 0% complete"), pct: 0, bar: "bg-gray-300", btn: t("Start"), status: "start" as const },
-                  { title: "Physical Education & Health", icon: "fa-dumbbell", color: "bg-cyan-100 text-cyan-600", lessons: t("8 lessons • 0% complete"), pct: 0, bar: "bg-gray-300", btn: t("Start"), status: "start" as const },
-                  { title: "Technology & Livelihood Education", icon: "fa-tools", color: "bg-emerald-100 text-emerald-600", lessons: t("12 lessons • 0% complete"), pct: 0, bar: "bg-gray-300", btn: t("Start"), status: "start" as const },
-                  { title: "Communication Skills", icon: "fa-comments", color: "bg-blue-100 text-blue-600", lessons: t("12 lessons • 100% complete"), pct: 100, bar: "bg-green-500", btn: t("Finish"), status: "finished" as const },
-                  { title: "Scientific Literacy", icon: "fa-flask", color: "bg-amber-100 text-amber-600", lessons: t("8 lessons • 100% complete"), pct: 100, bar: "bg-green-500", btn: t("Finish"), status: "finished" as const }
-                ].map((m) => (
-                  <ModuleCard key={m.title} module={m} onClick={(type) => setModuleModal({ title: m.title, type })} />
-                ))}
-              </div>
+              <ModuleModal resource={modalResource} onClose={() => setModalResource(null)} onViewContent={(r, idx) => { setModalResource(null); setViewContent({ resource: r, moduleIdx: idx }) }} t={t} />
+              <ModuleViewer data={viewContent} onBack={() => { setViewContent(null) }} onClose={() => setViewContent(null)} onNavigate={(idx) => setViewContent(prev => prev ? { ...prev, moduleIdx: idx } : null)} t={t} />
+              {resources.length === 0 ? (
+                <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 bg-gray-100">
+                    <i className="fas fa-book-open text-2xl text-gray-300" />
+                  </div>
+                  <p className="font-medium mb-1 text-gray-500">No modules available yet</p>
+                  <p className="text-sm text-gray-400">Modules created by teachers will appear here</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 grid-rows-[1fr]">
+                  {resources.map((r) => {
+                    const mods = r.modules || []
+                    const totalBlocks = mods.reduce((acc, m) => acc + (m.blocks?.length || 0), 0)
+                    const subjIcon = getSubjectIcon(r.subject)
+                    return (
+                      <ModuleCard
+                        key={r.id}
+                        title={r.title}
+                        subtitle={r.subject}
+                        icon={subjIcon.icon}
+                        color={`${subjIcon.bg} ${subjIcon.color}`}
+                        lessonsText={`${mods.length} module${mods.length !== 1 ? "s" : ""} • ${totalBlocks} block${totalBlocks !== 1 ? "s" : ""}`}
+                        pct={0}
+                        btnText={t("Start")}
+                        status="start"
+                        onClick={() => setModalResource(r)}
+                      />
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -468,53 +527,50 @@ export default function Student() {
             <div>
               <h2 className="text-2xl font-bold text-gray-800 mb-6">{t("Finish Modules")}</h2>
               <p className="text-gray-500 text-sm mb-6">{t("Unlock Activities, Tasks, Quizzes, and Assignments by completing each module.")}</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {[
-                  { title: "Communication Skills", icon: "fa-comments", color: "bg-blue-100 text-blue-600", status: "finished" as const },
-                  { title: "Scientific Literacy", icon: "fa-flask", color: "bg-amber-100 text-amber-600", status: "finished" as const },
-                  { title: "Mathematical Reasoning", icon: "fa-calculator", color: "bg-purple-100 text-purple-600", status: "continue" as const },
-                  { title: "Life & Career Skills", icon: "fa-briefcase", color: "bg-rose-100 text-rose-600", status: "continue" as const },
-                  { title: "English Language", icon: "fa-globe", color: "bg-teal-100 text-teal-600", status: "start" as const },
-                  { title: "Digital Literacy", icon: "fa-laptop-code", color: "bg-orange-100 text-orange-600", status: "start" as const },
-                  { title: "Humanities & Social Sciences", icon: "fa-book", color: "bg-indigo-100 text-indigo-600", status: "start" as const },
-                  { title: "Physical Education & Health", icon: "fa-dumbbell", color: "bg-cyan-100 text-cyan-600", status: "start" as const },
-                  { title: "Technology & Livelihood Education", icon: "fa-tools", color: "bg-emerald-100 text-emerald-600", status: "start" as const }
-                ].map((m) => {
-                  const unlocked = m.status === "finished"
-                  return (
-                    <div key={m.title} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className={`w-12 h-12 rounded-xl ${m.color} flex items-center justify-center`}>
-                          <i className={`fas ${m.icon} text-xl`} />
-                        </div>
-                        {!unlocked && <i className="fas fa-lock text-gray-300 text-lg" />}
-                        {unlocked && <i className="fas fa-unlock text-green-500 text-lg" />}
-                      </div>
-                      <h3 className="font-semibold text-gray-800 text-lg mb-1">{m.title}</h3>
-                      <p className={`text-xs font-medium mb-4 ${unlocked ? "text-green-600" : "text-gray-400"}`}>
-                        {unlocked ? t("Unlocked") : t("Complete this module to unlock")}
-                      </p>
-                      <div className="space-y-2">
-                        {[
-                          { label: t("Activities"), icon: "fa-tasks" },
-                          { label: t("Task"), icon: "fa-clipboard-list" },
-                          { label: t("Quiz"), icon: "fa-pen-alt" },
-                          { label: t("Assignments"), icon: "fa-file-alt" }
-                        ].map((item) => (
-                          <div key={item.label}
-                            className={`flex items-center gap-3 p-2.5 rounded-lg text-sm ${unlocked ? "bg-gray-50 hover:bg-gray-100 cursor-pointer" : "bg-gray-100 opacity-50 cursor-not-allowed"}`}>
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${unlocked ? "bg-navy-100 text-navy-600" : "bg-gray-200 text-gray-400"}`}>
-                              <i className={`fas ${item.icon} text-xs`} />
-                            </div>
-                            <span className={`font-medium ${unlocked ? "text-gray-700" : "text-gray-400"}`}>{item.label}</span>
-                            {!unlocked && <i className="fas fa-lock text-gray-300 text-xs ml-auto" />}
+              {resources.length === 0 ? (
+                <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
+                  <p className="font-medium text-gray-500">No modules to finish yet</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 grid-rows-[1fr]">
+                  {resources.map((r) => {
+                    const subjIcon = getSubjectIcon(r.subject)
+                    const mods = r.modules || []
+                    return (
+                      <div key={r.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm h-full flex flex-col">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className={`w-12 h-12 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center`}>
+                            <i className={`fas ${subjIcon.icon} text-xl`} />
                           </div>
-                        ))}
+                          <i className="fas fa-lock text-gray-300 text-lg" />
+                        </div>
+                        <h3 className="font-semibold text-gray-800 text-lg mb-1">{r.title}</h3>
+                        <p className="text-xs text-gray-400 mb-2">{r.subject}</p>
+                        <p className="text-xs font-medium mb-4 text-gray-400">
+                          {mods.length} module{mods.length !== 1 ? "s" : ""}
+                        </p>
+                        <div className="space-y-2 mt-auto">
+                          {[
+                            { label: t("Activities"), icon: "fa-tasks" },
+                            { label: t("Task"), icon: "fa-clipboard-list" },
+                            { label: t("Quiz"), icon: "fa-pen-alt" },
+                            { label: t("Assignments"), icon: "fa-file-alt" }
+                          ].map((item) => (
+                            <div key={item.label}
+                              className="flex items-center gap-3 p-2.5 rounded-lg text-sm bg-gray-100 opacity-50 cursor-not-allowed">
+                              <div className="w-8 h-8 rounded-full flex items-center justify-center bg-gray-200 text-gray-400">
+                                <i className={`fas ${item.icon} text-xs`} />
+                              </div>
+                              <span className="font-medium text-gray-400">{item.label}</span>
+                              <i className="fas fa-lock text-gray-300 text-xs ml-auto" />
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
-              </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1055,9 +1111,16 @@ export default function Student() {
   )
 }
 
-function ModuleCard({ module, onClick }: {
-  module: { title: string; icon: string; color: string; lessons: string; pct: number; bar: string; btn: string; status: "start" | "continue" | "finished" }
-  onClick: (type: "start" | "continue" | "finished") => void
+function ModuleCard({ title, subtitle, icon, color, lessonsText, pct, btnText, status, onClick }: {
+  title: string
+  subtitle: string
+  icon: string
+  color: string
+  lessonsText: string
+  pct: number
+  btnText: string
+  status: "start" | "continue" | "finished"
+  onClick: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
@@ -1081,98 +1144,329 @@ function ModuleCard({ module, onClick }: {
 
   useEffect(() => {
     if (!visible) return
-    const timer = setTimeout(() => setAnimPct(module.pct), 200)
+    const timer = setTimeout(() => setAnimPct(pct), 200)
     return () => clearTimeout(timer)
-  }, [visible, module.pct])
+  }, [visible, pct])
 
-  const btnStyle: React.CSSProperties = {}
   let btnClass = "w-full py-2 text-sm font-medium rounded-lg transition "
-  if (module.status === "start") {
+  if (status === "start") {
     btnClass += "bg-gray-400 text-white hover:bg-gray-500"
-  } else if (module.status === "finished") {
+  } else if (status === "finished") {
     btnClass += "bg-green-600 text-white hover:bg-green-700"
   } else {
     btnClass += "bg-navy-400 text-white hover:bg-navy-500"
   }
 
+  const barColor = pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-purple-500" : "bg-gray-300"
+
   return (
-    <div ref={ref} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-      <div className={`w-12 h-12 rounded-xl ${module.color} flex items-center justify-center mb-3`}>
-        <i className={`fas ${module.icon} text-xl`} />
+    <div ref={ref} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm h-full flex flex-col">
+      <div className={`w-12 h-12 rounded-xl ${color} flex items-center justify-center mb-3`}>
+        <i className={`fas ${icon} text-xl`} />
       </div>
-      <h3 className="font-semibold text-gray-800 text-lg mb-1">{module.title}</h3>
-      <p className="text-sm text-gray-400 mb-3">{module.lessons}</p>
+      <h3 className="font-semibold text-gray-800 text-lg mb-1">{title}</h3>
+      <p className="text-xs text-gray-400 mb-0.5">{subtitle}</p>
+      <p className="text-sm text-gray-400 mb-3">{lessonsText}</p>
       <div className="progress-bar mb-3">
-        <div className={`progress-fill ${module.bar}`}
+        <div className={`progress-fill ${barColor}`}
           style={{ width: `${animPct}%`, transition: "width 0.8s ease-out" }} />
       </div>
-      <button className={btnClass} style={btnStyle}
-        onClick={() => onClick(module.status)}>
-        {module.btn}
+      <button className={btnClass} onClick={onClick}>
+        {btnText}
       </button>
     </div>
   )
 }
 
-function ModuleModal({ data, onClose, t }: {
-  data: { title: string; type: "start" | "continue" | "finished" } | null
+function ModuleModal({ resource, onClose, onViewContent, t }: {
+  resource: Resource | null
   onClose: () => void
+  onViewContent: (resource: Resource, moduleIdx: number) => void
+  t: (text: string) => string
+}) {
+  if (!resource) return null
+
+  const mods = resource.modules || []
+  const subjIcon = getSubjectIcon(resource.subject)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        {/* Header with gradient */}
+        <div className="relative overflow-hidden">
+          <div className={`absolute inset-0 bg-gradient-to-br ${subjIcon.bg.includes("red") ? "from-red-50 to-red-100/50" : subjIcon.bg.includes("blue") ? "from-blue-50 to-blue-100/50" : subjIcon.bg.includes("purple") ? "from-purple-50 to-purple-100/50" : subjIcon.bg.includes("amber") ? "from-amber-50 to-amber-100/50" : subjIcon.bg.includes("cyan") ? "from-cyan-50 to-cyan-100/50" : subjIcon.bg.includes("pink") ? "from-pink-50 to-pink-100/50" : subjIcon.bg.includes("orange") ? "from-orange-50 to-orange-100/50" : subjIcon.bg.includes("rose") ? "from-rose-50 to-rose-100/50" : subjIcon.bg.includes("indigo") ? "from-indigo-50 to-indigo-100/50" : subjIcon.bg.includes("emerald") ? "from-emerald-50 to-emerald-100/50" : "from-navy-50 to-navy-100/50"}`} />
+          <div className="relative px-6 py-6 flex items-start gap-4">
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${subjIcon.bg} ${subjIcon.color}`}>
+              <i className={`fas ${subjIcon.icon} text-2xl`} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-lg font-bold text-gray-800 leading-tight">{resource.title}</h3>
+              <p className="text-sm text-gray-500 mt-1">{resource.subject}</p>
+              {resource.description && <p className="text-xs text-gray-400 mt-1.5 line-clamp-2">{resource.description}</p>}
+              <div className="flex items-center gap-3 mt-3">
+                <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-white/80 text-gray-600 shadow-sm">
+                  <i className="fas fa-layer-group mr-1" />{mods.length} module{mods.length !== 1 ? "s" : ""}
+                </span>
+                {mods.reduce((acc, m) => acc + (m.blocks?.length || 0), 0) > 0 && (
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-white/80 text-gray-600 shadow-sm">
+                    <i className="fas fa-th-large mr-1" />{mods.reduce((acc, m) => acc + (m.blocks?.length || 0), 0)} blocks
+                  </span>
+                )}
+              </div>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/80 hover:bg-white flex items-center justify-center shadow-sm transition shrink-0">
+              <i className="fas fa-times text-gray-500" />
+            </button>
+          </div>
+        </div>
+
+        {/* Module list */}
+        <div className="p-4 max-h-[55vh] overflow-y-auto">
+          {mods.length === 0 ? (
+            <div className="text-center py-10">
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 bg-gray-100">
+                <i className="fas fa-book-open text-xl text-gray-300" />
+              </div>
+              <p className="font-medium text-gray-500">No modules yet</p>
+              <p className="text-xs text-gray-400 mt-1">Modules will appear here once created</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {mods.map((m, i) => {
+                const blockCount = m.blocks?.length || 0
+                const hasContent = blockCount > 0
+                return (
+                  <button
+                    key={i}
+                    onClick={() => onViewContent(resource, i)}
+                    className="w-full text-left p-4 rounded-xl border border-gray-100 hover:border-navy-200 hover:bg-navy-50/50 transition-all group"
+                  >
+                    <div className="flex items-start gap-3.5">
+                      <span className="w-9 h-9 rounded-xl bg-navy-500/10 text-navy-600 flex items-center justify-center text-sm font-bold shrink-0 group-hover:bg-navy-500 group-hover:text-white transition">
+                        {i + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-gray-800 group-hover:text-navy-600 transition truncate">{m.name || `Module ${i + 1}`}</span>
+                          {hasContent && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-green-50 text-green-600 shrink-0">
+                              <i className="fas fa-check-circle mr-0.5" />Has content
+                            </span>
+                          )}
+                          {!hasContent && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 shrink-0">
+                              Empty
+                            </span>
+                          )}
+                        </div>
+                        {m.description && <p className="text-xs text-gray-400 mt-1 line-clamp-1">{m.description}</p>}
+                        {hasContent && (
+                          <div className="flex items-center gap-2 mt-2">
+                            {(() => {
+                              const types = { content: 0, image: 0, table: 0 }
+                              m.blocks!.forEach(b => { if (b.type in types) types[b.type as keyof typeof types]++ })
+                              return (
+                                <>
+                                  {types.content > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-500 font-medium"><i className="fas fa-align-left mr-0.5" />{types.content}</span>}
+                                  {types.image > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-500 font-medium"><i className="fas fa-image mr-0.5" />{types.image}</span>}
+                                  {types.table > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-500 font-medium"><i className="fas fa-table mr-0.5" />{types.table}</span>}
+                                </>
+                              )
+                            })()}
+                            <span className="text-[10px] text-gray-400">{blockCount} block{blockCount !== 1 ? "s" : ""}</span>
+                          </div>
+                        )}
+                      </div>
+                      <i className="fas fa-arrow-right text-gray-300 text-xs mt-3 group-hover:text-navy-400 group-hover:translate-x-0.5 transition-all" />
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end bg-gray-50/50">
+          <button onClick={onClose}
+            className="px-5 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition shadow-sm">
+            {t("Cancel")}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ModuleViewer({ data, onBack, onClose, onNavigate, t }: {
+  data: { resource: Resource; moduleIdx: number } | null
+  onBack: () => void
+  onClose: () => void
+  onNavigate: (moduleIdx: number) => void
   t: (text: string) => string
 }) {
   if (!data) return null
 
-  const modules = [
-    { num: "Module 1.0", title: "Introduction & Basics" },
-    { num: "Module 2.0", title: "Core Concepts" },
-    { num: "Module 3.0", title: "Intermediate Topics" },
-    { num: "Module 4.0", title: "Advanced Lessons" },
-    { num: "Module 5.0", title: "Final Assessment" }
-  ]
+  const mods = data.resource.modules || []
+  const mod = mods[data.moduleIdx]
+  if (!mod) return null
 
-  let doneMap: boolean[]
-  if (data.type === "start") {
-    doneMap = [false, false, false, false, false]
-  } else if (data.type === "continue") {
-    doneMap = [true, true, true, false, false]
-  } else {
-    doneMap = [true, true, true, true, true]
-  }
+  const totalBlocks = (mod.blocks || []).length
+  const blockTypeCounts = { content: 0, image: 0, table: 0 }
+  ;(mod.blocks || []).forEach(b => { if (b.type in blockTypeCounts) blockTypeCounts[b.type as keyof typeof blockTypeCounts]++ })
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between">
-          <h3 className="text-lg font-bold text-gray-800">{data.title}</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center">
-            <i className="fas fa-times text-gray-500" />
-          </button>
-        </div>
-        <div className="p-6">
-          <div className="space-y-3">
-            {modules.map((m, i) => (
-              <div key={m.num}
-                className={`flex items-center gap-3 p-3 rounded-lg ${doneMap[i] ? "bg-green-50" : "bg-gray-50"}`}>
-                <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${doneMap[i] ? "bg-green-500 text-white" : "bg-gray-200 text-gray-500"}`}>
-                  {doneMap[i] ? <i className="fas fa-check" /> : i + 1}
-                </span>
-                <span className={`text-sm font-medium ${doneMap[i] ? "text-green-700" : "text-gray-700"}`}>{m.num}: {m.title}</span>
-                {doneMap[i] && <span className="text-xs text-green-500 ml-auto">{t("Done")}</span>}
-              </div>
-            ))}
+    <div className="fixed inset-0 z-50 flex flex-col bg-gray-50" onClick={(e) => e.stopPropagation()}>
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-4 shrink-0 shadow-sm">
+        <button onClick={onBack} className="w-9 h-9 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition">
+          <i className="fas fa-arrow-left text-gray-500 text-sm" />
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 text-[11px] text-gray-400 mb-0.5">
+            <span className="truncate">{data.resource.title}</span>
+            <i className="fas fa-chevron-right text-[8px] shrink-0" />
+            <span className="font-medium text-navy-500 shrink-0">Module {data.moduleIdx + 1} of {mods.length}</span>
           </div>
+          <h3 className="text-sm font-bold text-gray-800 truncate">{mod.name || `Module ${data.moduleIdx + 1}`}</h3>
         </div>
-        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-          <button onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">
-            Cancel
-          </button>
-          <button className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition ${data.type === "finished" ? "bg-green-600 hover:bg-green-700" : "bg-navy-500 hover:bg-navy-600"}`}>
-            {data.type === "start" ? t("Start Module") : data.type === "finished" ? t("Done") : t("Continue")}
+        <div className="flex items-center gap-1.5">
+          {totalBlocks > 0 && (
+            <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-1 rounded-lg hidden sm:inline">
+              {totalBlocks} block{totalBlocks !== 1 ? "s" : ""}
+            </span>
+          )}
+          <button onClick={onClose} className="w-9 h-9 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition">
+            <i className="fas fa-times text-gray-500 text-sm" />
           </button>
         </div>
       </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto py-8 px-6">
+          {/* Module header card */}
+          <div className="mb-8">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="w-10 h-10 rounded-xl bg-navy-500 text-white flex items-center justify-center text-sm font-bold shrink-0">
+                {data.moduleIdx + 1}
+              </span>
+              <div>
+                <h1 className="text-xl font-bold text-gray-800">{mod.name || `Module ${data.moduleIdx + 1}`}</h1>
+                {data.resource.subject && <p className="text-xs text-gray-400 mt-0.5">{data.resource.subject}</p>}
+              </div>
+            </div>
+            {mod.description && (
+              <p className="text-sm text-gray-500 leading-relaxed ml-[52px]">{mod.description}</p>
+            )}
+            {totalBlocks > 0 && (
+              <div className="flex items-center gap-2 mt-4 ml-[52px]">
+                {blockTypeCounts.content > 0 && <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-blue-50 text-blue-600"><i className="fas fa-align-left mr-1" />{blockTypeCounts.content} content</span>}
+                {blockTypeCounts.image > 0 && <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-green-50 text-green-600"><i className="fas fa-image mr-1" />{blockTypeCounts.image} image{blockTypeCounts.image !== 1 ? "s" : ""}</span>}
+                {blockTypeCounts.table > 0 && <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-purple-50 text-purple-600"><i className="fas fa-table mr-1" />{blockTypeCounts.table} table{blockTypeCounts.table !== 1 ? "s" : ""}</span>}
+              </div>
+            )}
+          </div>
+
+          <div className="w-full h-px bg-gray-200 mb-8" />
+
+          {/* Blocks */}
+          {(!mod.blocks || mod.blocks.length === 0) ? (
+            <div className="text-center py-20">
+              <div className="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-5 bg-gray-100">
+                <i className="fas fa-file-alt text-3xl text-gray-300" />
+              </div>
+              <p className="font-semibold text-gray-500 mb-1">No content yet</p>
+              <p className="text-sm text-gray-400">This module is being prepared</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {mod.blocks.map((block, blockIdx) => (
+                <div key={block.id} className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+                  {/* Block header */}
+                  {block.topic ? (
+                    <div className="px-5 pt-4 pb-3 border-b border-gray-50">
+                      <div className="flex items-center gap-2.5">
+                        <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                          block.type === "content" ? "bg-blue-50 text-blue-600" :
+                          block.type === "image" ? "bg-green-50 text-green-600" :
+                          "bg-purple-50 text-purple-600"
+                        }`}>
+                          {blockIdx + 1}
+                        </span>
+                        <h4 className="text-sm font-bold text-gray-800">{block.topic}</h4>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="px-5 pt-3">
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                        block.type === "content" ? "bg-blue-50 text-blue-500" :
+                        block.type === "image" ? "bg-green-50 text-green-500" :
+                        "bg-purple-50 text-purple-500"
+                      }`}>
+                        {block.type === "content" && <i className="fas fa-align-left" />}
+                        {block.type === "image" && <i className="fas fa-image" />}
+                        {block.type === "table" && <i className="fas fa-table" />}
+                        {block.type}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Block body */}
+                  <div className="px-5 pb-5 pt-3">
+                    {block.description && (
+                      <div
+                        className="tiptap-preview prose prose-sm max-w-none"
+                        dangerouslySetInnerHTML={{ __html: block.description }}
+                      />
+                    )}
+                    {block.type === "image" && block.imageData && (
+                      <div className="mt-3">
+                        <img src={block.imageData} alt="" className="max-w-full max-h-96 rounded-xl border object-contain mx-auto" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Module navigation */}
+          <div className="flex items-center justify-between mt-10 pt-6 border-t border-gray-200">
+            <button
+              disabled={data.moduleIdx === 0}
+              onClick={() => onNavigate(data.moduleIdx - 1)}
+              className="px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <i className="fas fa-chevron-left text-xs" />Previous Module
+            </button>
+            <span className="text-xs text-gray-400">
+              {data.moduleIdx + 1} / {mods.length}
+            </span>
+            <button
+              disabled={data.moduleIdx === mods.length - 1}
+              onClick={() => onNavigate(data.moduleIdx + 1)}
+              className="px-4 py-2.5 text-sm font-medium text-white bg-navy-500 rounded-xl hover:bg-navy-600 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              Next Module<i className="fas fa-chevron-right text-xs" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <style>{`
+        .tiptap-preview img { max-width: 100%; border-radius: 8px; margin: 0.5rem 0; }
+        .tiptap-preview img[data-float="left"] { float: left; margin: 0.25rem 1rem 0.5rem 0; max-width: 50%; }
+        .tiptap-preview img[data-float="right"] { float: right; margin: 0.25rem 0 0.5rem 1rem; max-width: 50%; }
+        .tiptap-preview table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+        .tiptap-preview td, .tiptap-preview th { border: 1px solid #d1d5db; padding: 0.5rem; }
+        .tiptap-preview th { background: #f3f4f6; font-weight: 600; }
+        .tiptap-preview ul { list-style-type: disc; padding-left: 1.5rem; }
+        .tiptap-preview ol { list-style-type: decimal; padding-left: 1.5rem; }
+        .tiptap-preview blockquote { border-left: 3px solid #d1d5db; padding-left: 0.75rem; color: #6b7280; font-style: italic; }
+        .tiptap-preview a { color: #2563eb; text-decoration: underline; }
+        .tiptap-preview p { margin: 0.25rem 0; }
+      `}</style>
     </div>
   )
 }
