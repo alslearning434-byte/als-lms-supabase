@@ -40,6 +40,21 @@ export interface ModuleContent {
   name: string
   description: string
   blocks: ModuleBlock[]
+  assessment?: ModuleAssessment
+}
+
+export interface AssessmentQuestion {
+  id: string
+  text: string
+  type: "Multiple Choice" | "True/False" | "Short Answer"
+  options: string[]
+  correctAnswer: string
+}
+
+export interface ModuleAssessment {
+  title: string
+  description: string
+  questions: AssessmentQuestion[]
 }
 
 export interface Resource {

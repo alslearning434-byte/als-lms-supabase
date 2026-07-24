@@ -183,7 +183,7 @@ export default function Teacher() {
   }, [profile?.uid])
 
   const handleResourceUpload = async () => {
-    if (!resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0)) return
+    if (!resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0 && !m.assessment)) return
     setResSaving(true)
     try {
       const filteredModules = resModules.filter(m => m.name.trim() || m.blocks.length > 0)
@@ -227,7 +227,7 @@ export default function Teacher() {
   }
 
   const addModule = () => {
-    setResModules((prev) => [...prev, { name: "", description: "", blocks: [] }])
+    setResModules((prev) => [...prev, { name: "", description: "", blocks: [], assessment: undefined }])
   }
 
   const removeModule = (index: number) => {
@@ -1327,7 +1327,7 @@ export default function Teacher() {
                   Cancel
                 </button>
               )}
-              <button onClick={handleResourceUpload} disabled={resSaving || !resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0)}
+              <button onClick={handleResourceUpload} disabled={resSaving || !resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0 && !m.assessment)}
                 className="flex-1 py-2.5 rounded-xl bg-navy-500 text-white text-sm font-medium hover:bg-navy-600 transition flex items-center justify-center gap-2 disabled:opacity-70">
                 {resSaving ? <><i className="fas fa-spinner fa-spin text-xs" /> Saving...</> : <><i className="fas fa-save text-xs" /> {editingResourceId ? "Update" : "Save"}</>}
               </button>

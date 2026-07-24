@@ -5,6 +5,7 @@ import TopBar from "../components/TopBar"
 import ChatWidget from "../components/ChatWidget"
 import LogoutModal from "../components/LogoutModal"
 import ChangePasswordModal from "../components/ChangePasswordModal"
+import AssessmentTaker from "../components/AssessmentTaker"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
 import { db } from "../firebase"
@@ -58,6 +59,8 @@ export default function Student() {
   const [modalResource, setModalResource] = useState<Resource | null>(null)
   const [viewContent, setViewContent] = useState<{ resource: Resource; moduleIdx: number } | null>(null)
   const [progressMap, setProgressMap] = useState<Record<string, number[]>>({})
+  const [activeAssessment, setActiveAssessment] = useState<{ resourceId: string; assessmentId: string; moduleIdx: number } | null>(null)
+  const [assessmentSubmissions, setAssessmentSubmissions] = useState<Record<string, { score: number; totalPoints: number }>>({})
 
   const t = (text: string): string => {
     if (language !== "tl") return text
@@ -276,6 +279,21 @@ export default function Student() {
             } catch { /* offline */ }
           }))
           setProgressMap(pMap)
+        }
+
+        if (user?.uid) {
+          try {
+            const subSnap = await getDocs(collection(db, "assessmentSubmissions"))
+            const subs: Record<string, { score: number; totalPoints: number }> = {}
+            subSnap.docs.forEach((d) => {
+              const data = d.data()
+              if (data.studentId === user.uid) {
+                const key = `${data.resourceId}_${data.assessmentId}`
+                subs[key] = { score: data.score, totalPoints: data.totalPoints }
+              }
+            })
+            setAssessmentSubmissions(subs)
+          } catch { /* offline */ }
         }
       } catch (err) {
         console.error("Failed to fetch resources:", err)
@@ -559,47 +577,98 @@ export default function Student() {
           {/* Finish Modules */}
           {activePage === "finish-modules" && (
             <div>
-              <h2 className="text-2xl font-bold text-gray-800 mb-6">{t("Finish Modules")}</h2>
-              <p className="text-gray-500 text-sm mb-6">{t("Unlock Activities, Tasks, Quizzes, and Assignments by completing each module.")}</p>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">{t("Finish Modules")}</h2>
+              <p className="text-gray-500 text-sm mb-6">{t("Complete all modules to unlock assessments and quizzes.")}</p>
               {resources.length === 0 ? (
                 <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
                   <p className="font-medium text-gray-500">No modules to finish yet</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 grid-rows-[1fr]">
+                <div className="space-y-6">
                   {resources.map((r) => {
                     const subjIcon = getSubjectIcon(r.subject)
                     const mods = r.modules || []
+                    const viewed = progressMap[r.id] || []
+                    const allViewed = mods.length > 0 && viewed.length >= mods.length
+                    const modulesWithAssessment = mods.map((m, i) => ({ mod: m, idx: i })).filter(({ mod }) => mod.assessment && mod.assessment.questions.length > 0)
+                    const hasAssessments = modulesWithAssessment.length > 0
+                    const pct = mods.length > 0 ? Math.round((viewed.length / mods.length) * 100) : 0
+
                     return (
-                      <div key={r.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm h-full flex flex-col">
-                        <div className="flex items-center justify-between mb-3">
-                          <div className={`w-12 h-12 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center`}>
-                            <i className={`fas ${subjIcon.icon} text-xl`} />
-                          </div>
-                          <i className="fas fa-lock text-gray-300 text-lg" />
-                        </div>
-                        <h3 className="font-semibold text-gray-800 text-lg mb-1">{r.title}</h3>
-                        <p className="text-xs text-gray-400 mb-2">{r.subject}</p>
-                        <p className="text-xs font-medium mb-4 text-gray-400">
-                          {mods.length} module{mods.length !== 1 ? "s" : ""}
-                        </p>
-                        <div className="space-y-2 mt-auto">
-                          {[
-                            { label: t("Activities"), icon: "fa-tasks" },
-                            { label: t("Task"), icon: "fa-clipboard-list" },
-                            { label: t("Quiz"), icon: "fa-pen-alt" },
-                            { label: t("Assignments"), icon: "fa-file-alt" }
-                          ].map((item) => (
-                            <div key={item.label}
-                              className="flex items-center gap-3 p-2.5 rounded-lg text-sm bg-gray-100 opacity-50 cursor-not-allowed">
-                              <div className="w-8 h-8 rounded-full flex items-center justify-center bg-gray-200 text-gray-400">
-                                <i className={`fas ${item.icon} text-xs`} />
-                              </div>
-                              <span className="font-medium text-gray-400">{item.label}</span>
-                              <i className="fas fa-lock text-gray-300 text-xs ml-auto" />
+                      <div key={r.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden ${allViewed && hasAssessments ? "border-green-200" : "border-gray-200"}`}>
+                        <div className="p-5">
+                          <div className="flex items-start gap-4">
+                            <div className={`w-12 h-12 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0`}>
+                              <i className={`fas ${subjIcon.icon} text-xl`} />
                             </div>
-                          ))}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h3 className="font-semibold text-gray-800 text-lg">{r.title}</h3>
+                                {allViewed && hasAssessments && (
+                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
+                                    <i className="fas fa-unlock mr-0.5" /> Unlocked
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-400 mb-3">{r.subject} &bull; {mods.length} module{mods.length !== 1 ? "s" : ""}</p>
+                              <div className="flex items-center gap-3 mb-1">
+                                <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className={`h-full rounded-full transition-all duration-500 ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-navy-500" : "bg-gray-300"}`} style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="text-xs font-bold text-gray-600 shrink-0">{viewed.length}/{mods.length}</span>
+                              </div>
+                              <p className="text-[11px] text-gray-400">{allViewed ? "All modules completed" : `${mods.length - viewed.length} module${mods.length - viewed.length !== 1 ? "s" : ""} remaining`}</p>
+                            </div>
+                          </div>
                         </div>
+
+                        {hasAssessments && (
+                          <div className={`border-t px-5 py-4 ${allViewed ? "bg-green-50/50 border-green-100" : "bg-gray-50 border-gray-100"}`}>
+                            <p className={`text-xs font-semibold mb-3 ${allViewed ? "text-green-700" : "text-gray-400"}`}>
+                              <i className="fas fa-clipboard-list mr-1" />
+                              {allViewed ? "Available Assessments" : "Complete all modules to unlock assessments"}
+                            </p>
+                            <div className="space-y-2">
+                              {modulesWithAssessment.map(({ mod, idx }) => {
+                                const subKey = `${r.id}_${idx}`
+                                const sub = assessmentSubmissions[subKey]
+                                const isViewed = viewed.includes(idx)
+                                const isUnlocked = allViewed && isViewed
+                                return (
+                                  <div key={idx} className={`flex items-center gap-3 p-3 rounded-lg border transition ${sub ? "bg-green-50 border-green-200" : isUnlocked ? "bg-white border-gray-200 hover:border-navy-300 hover:shadow-sm cursor-pointer" : "bg-gray-100 border-gray-200 opacity-60"}`}
+                                    onClick={() => { if (isUnlocked && !sub) setActiveAssessment({ resourceId: r.id, assessmentId: subKey, moduleIdx: idx }) }}>
+                                    <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${sub ? "bg-green-500 text-white" : isUnlocked ? "bg-navy-100 text-navy-600" : "bg-gray-200 text-gray-400"}`}>
+                                      {sub ? <i className="fas fa-check text-xs" /> : isUnlocked ? <i className="fas fa-play text-xs" /> : <i className="fas fa-lock text-xs" />}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className={`text-sm font-medium ${sub ? "text-green-700" : isUnlocked ? "text-gray-800" : "text-gray-400"}`}>{mod.assessment!.title || `Module ${idx + 1} Assessment`}</p>
+                                      <p className={`text-[11px] ${sub ? "text-green-600" : "text-gray-400"}`}>
+                                        {sub ? `${sub.score}/${sub.totalPoints} (${Math.round((sub.score / sub.totalPoints) * 100)}%)` : `${mod.assessment!.questions.length} question${mod.assessment!.questions.length !== 1 ? "s" : ""}`}
+                                      </p>
+                                    </div>
+                                    {sub ? (
+                                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">
+                                        <i className="fas fa-check-circle mr-0.5" />Submitted
+                                      </span>
+                                    ) : isUnlocked ? (
+                                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-navy-100 text-navy-600 shrink-0">
+                                        Start
+                                      </span>
+                                    ) : (
+                                      <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {!hasAssessments && (
+                          <div className="border-t border-gray-100 bg-gray-50 px-5 py-3">
+                            <p className="text-xs text-gray-400"><i className="fas fa-info-circle mr-1" />No assessments added to this resource yet</p>
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -1141,6 +1210,23 @@ export default function Student() {
       <ChangePasswordModal open={pwdOpen} onClose={() => setPwdOpen(false)} />
       <LogoutModal open={logoutOpen} onCancel={() => setLogoutOpen(false)} onConfirm={() => { logout(); navigate("/"); }} />
       <ChatWidget faqMode />
+
+      {activeAssessment && (() => {
+        const r = resources.find(r => r.id === activeAssessment.resourceId)
+        if (!r) return null
+        const mod = r.modules[activeAssessment.moduleIdx]
+        if (!mod?.assessment) return null
+        return (
+          <AssessmentTaker
+            resourceId={r.id}
+            assessmentId={activeAssessment.assessmentId}
+            assessment={mod.assessment}
+            studentId={user?.uid || ""}
+            studentName={profile?.displayName || "Student"}
+            onClose={() => setActiveAssessment(null)}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -1184,11 +1270,11 @@ function ModuleCard({ title, subtitle, icon, color, lessonsText, pct, btnText, s
 
   let btnClass = "w-full py-2 text-sm font-medium rounded-lg transition "
   if (status === "start") {
-    btnClass += "bg-gray-400 text-white hover:bg-gray-500"
+    btnClass += "bg-navy-500 text-white hover:bg-navy-600 shadow-sm"
   } else if (status === "finished") {
     btnClass += "bg-green-600 text-white hover:bg-green-700"
   } else {
-    btnClass += "bg-navy-400 text-white hover:bg-navy-500"
+    btnClass += "bg-purple-500 text-white hover:bg-purple-600 shadow-sm"
   }
 
   const barColor = pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-purple-500" : "bg-gray-300"

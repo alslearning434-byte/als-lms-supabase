@@ -1,34 +1,31 @@
 import { useState } from "react"
-import type { Resource, Assessment, AssessmentQuestion } from "../types"
+import type { ModuleAssessment, AssessmentQuestion } from "../types"
 import { db } from "../firebase"
 import { collection, addDoc } from "firebase/firestore"
 
 interface Props {
-  resource: Resource
-  assessment: Assessment
+  resourceId: string
+  assessmentId: string
+  assessment: ModuleAssessment
   studentId: string
   studentName: string
   onClose: () => void
 }
 
-export default function AssessmentTaker({ resource, assessment, studentId, studentName, onClose }: Props) {
-  const [answers, setAnswers] = useState<Record<string, string | string[]>>({})
+export default function AssessmentTaker({ resourceId, assessmentId, assessment, studentId, studentName, onClose }: Props) {
+  const [answers, setAnswers] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState(false)
-  const [score, setScore] = useState<{ score: number; total: number; results: { qId: string; correct: boolean; correctAnswer: string | string[] }[] } | null>(null)
+  const [score, setScore] = useState<{ score: number; total: number; results: { qId: string; correct: boolean; correctAnswer: string }[] } | null>(null)
 
   const grade = () => {
     const results = assessment.questions.map((q) => {
-      const a = answers[q.id]
+      const a = answers[q.id] || ""
       let correct = false
       if (q.type === "Multiple Choice" || q.type === "True/False") {
         correct = a === q.correctAnswer
-      } else if (q.type === "Checkboxes") {
-        const s = Array.isArray(a) ? [...a].sort() : []
-        const c = Array.isArray(q.correctAnswer) ? [...q.correctAnswer].sort() : []
-        correct = JSON.stringify(s) === JSON.stringify(c)
       } else if (q.type === "Short Answer") {
-        const expected = String(q.correctAnswer).toLowerCase()
-        const given = String(a || "").toLowerCase().trim()
+        const expected = q.correctAnswer.toLowerCase()
+        const given = a.toLowerCase().trim()
         correct = expected.includes(given) && given.length > 0
       }
       return { qId: q.id, correct, correctAnswer: q.correctAnswer }
@@ -37,8 +34,8 @@ export default function AssessmentTaker({ resource, assessment, studentId, stude
     setScore({ score: sc, total: results.length, results })
     setSubmitted(true)
     addDoc(collection(db, "assessmentSubmissions"), {
-      assessmentId: assessment.id,
-      resourceId: resource.id,
+      assessmentId,
+      resourceId,
       studentId,
       studentName,
       score: sc,
@@ -47,8 +44,6 @@ export default function AssessmentTaker({ resource, assessment, studentId, stude
       submittedAt: new Date().toISOString(),
     }).catch(() => {})
   }
-
-  const typeColor: Record<string, string> = { quiz: "bg-purple-100 text-purple-600", task: "bg-blue-100 text-blue-600", activity: "bg-amber-100 text-amber-600", assignment: "bg-green-100 text-green-600" }
 
   return (
     <div className="fixed inset-0 z-50 bg-white overflow-y-auto">
@@ -60,19 +55,12 @@ export default function AssessmentTaker({ resource, assessment, studentId, stude
             </button>
             <div>
               <h2 className="text-xl font-bold text-gray-800">{assessment.title}</h2>
-              <p className="text-sm text-gray-400">{resource.title} &bull; {assessment.questions.length} questions</p>
+              <p className="text-sm text-gray-400">{assessment.questions.length} question{assessment.questions.length !== 1 ? "s" : ""}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {assessment.timeLimit && (
-              <span className="px-3 py-1.5 bg-navy-100 text-navy-600 text-sm font-medium rounded-lg">
-                <i className="fas fa-clock mr-1" /> {assessment.timeLimit} min
-              </span>
-            )}
-            <span className={`px-3 py-1.5 text-sm font-medium rounded-lg ${typeColor[assessment.type] || "bg-gray-100 text-gray-600"}`}>
-              {assessment.type.charAt(0).toUpperCase() + assessment.type.slice(1)}
-            </span>
-          </div>
+          <span className="px-3 py-1.5 bg-purple-100 text-purple-600 text-sm font-medium rounded-lg">
+            <i className="fas fa-clipboard-list mr-1" /> Quiz
+          </span>
         </div>
 
         {assessment.description && (
@@ -89,7 +77,7 @@ export default function AssessmentTaker({ resource, assessment, studentId, stude
             <div className="flex gap-3 pb-8">
               <button onClick={onClose} className="px-6 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition">Cancel</button>
               <button onClick={grade}
-                disabled={assessment.questions.some((q) => answers[q.id] === undefined || (Array.isArray(answers[q.id]) && (answers[q.id] as string[]).length === 0))}
+                disabled={assessment.questions.some((q) => !answers[q.id])}
                 className="flex-1 py-3 rounded-xl bg-navy-500 text-white text-sm font-medium hover:bg-navy-600 transition disabled:opacity-50 flex items-center justify-center gap-2">
                 <i className="fas fa-paper-plane text-xs" /> Submit Assessment
               </button>
@@ -120,13 +108,12 @@ export default function AssessmentTaker({ resource, assessment, studentId, stude
                       {isCorrect ? <i className="fas fa-check text-xs" /> : <i className="fas fa-times text-xs" />}
                     </span>
                     <div className="flex-1">
-                      {q.imageUrl && <img src={q.imageUrl} alt="" className="max-h-32 rounded-lg mb-2 object-contain" />}
                       <p className="text-sm font-semibold text-gray-800">{i + 1}. {q.text}</p>
                     </div>
                   </div>
                   <div className="ml-11 space-y-1">
-                    <p className="text-sm text-gray-600">Your answer: <span className={`font-medium ${isCorrect ? "text-green-700" : "text-red-700"}`}>{formatAnswer(answers[q.id])}</span></p>
-                    {!isCorrect && <p className="text-sm text-green-700">Correct answer: <span className="font-medium">{formatAnswer(r?.correctAnswer)}</span></p>}
+                    <p className="text-sm text-gray-600">Your answer: <span className={`font-medium ${isCorrect ? "text-green-700" : "text-red-700"}`}>{answers[q.id] || "Not answered"}</span></p>
+                    {!isCorrect && <p className="text-sm text-green-700">Correct answer: <span className="font-medium">{r?.correctAnswer}</span></p>}
                   </div>
                 </div>
               )
@@ -142,24 +129,17 @@ export default function AssessmentTaker({ resource, assessment, studentId, stude
   )
 }
 
-function formatAnswer(a: string | string[] | undefined): string {
-  if (a === undefined) return "Not answered"
-  if (Array.isArray(a)) return a.length > 0 ? a.join(", ") : "Not answered"
-  return a || "Not answered"
-}
-
 function QuestionCard({ q, index, answer, onChange }: {
   q: AssessmentQuestion
   index: number
-  answer: string | string[] | undefined
-  onChange: (val: string | string[]) => void
+  answer: string | undefined
+  onChange: (val: string) => void
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
       <div className="flex items-start gap-3 mb-3">
         <span className="w-8 h-8 rounded-full bg-navy-500 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">{index + 1}</span>
         <div className="flex-1">
-          {q.imageUrl && <img src={q.imageUrl} alt="" className="max-h-48 rounded-lg mb-3 object-contain" />}
           <p className="text-sm font-semibold text-gray-800">{q.text}</p>
         </div>
       </div>
@@ -167,13 +147,12 @@ function QuestionCard({ q, index, answer, onChange }: {
       {q.type === "Multiple Choice" && (
         <div className="space-y-2 ml-11">
           {q.options.map((opt, j) => (
-            <label key={j} onClick={() => onChange(opt.text)}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition ${answer === opt.text ? "border-navy-500 bg-navy-500/5" : "border-gray-200 hover:border-gray-300"}`}>
-              <span className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition ${answer === opt.text ? "border-navy-500 bg-navy-500" : "border-gray-300"}`}>
-                {answer === opt.text && <span className="w-2 h-2 rounded-full bg-white" />}
+            <label key={j} onClick={() => onChange(opt)}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition ${answer === opt ? "border-navy-500 bg-navy-500/5" : "border-gray-200 hover:border-gray-300"}`}>
+              <span className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition ${answer === opt ? "border-navy-500 bg-navy-500" : "border-gray-300"}`}>
+                {answer === opt && <span className="w-2 h-2 rounded-full bg-white" />}
               </span>
-              {opt.imageUrl && <img src={opt.imageUrl} alt="" className="h-10 rounded" />}
-              <span className="text-sm text-gray-700">{opt.text}</span>
+              <span className="text-sm text-gray-700">{opt}</span>
             </label>
           ))}
         </div>
@@ -190,32 +169,9 @@ function QuestionCard({ q, index, answer, onChange }: {
         </div>
       )}
 
-      {q.type === "Checkboxes" && (
-        <div className="space-y-2 ml-11">
-          {q.options.map((opt, j) => {
-            const selected = Array.isArray(answer) && answer.includes(opt.text)
-            return (
-              <label key={j} onClick={() => {
-                const current = Array.isArray(answer) ? [...answer] : []
-                const idx = current.indexOf(opt.text)
-                if (idx >= 0) current.splice(idx, 1); else current.push(opt.text)
-                onChange(current)
-              }}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition ${selected ? "border-navy-500 bg-navy-500/5" : "border-gray-200 hover:border-gray-300"}`}>
-                <span className={`w-6 h-6 rounded border-2 flex items-center justify-center flex-shrink-0 transition ${selected ? "border-navy-500 bg-navy-500" : "border-gray-300"}`}>
-                  {selected && <i className="fas fa-check text-white text-xs" />}
-                </span>
-                {opt.imageUrl && <img src={opt.imageUrl} alt="" className="h-10 rounded" />}
-                <span className="text-sm text-gray-700">{opt.text}</span>
-              </label>
-            )
-          })}
-        </div>
-      )}
-
       {q.type === "Short Answer" && (
         <div className="ml-11">
-          <input type="text" value={typeof answer === "string" ? answer : ""}
+          <input type="text" value={answer || ""}
             onChange={(e) => onChange(e.target.value)}
             placeholder="Type your answer..."
             className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500" />
