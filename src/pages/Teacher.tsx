@@ -868,41 +868,46 @@ export default function Teacher() {
                   const mods = r.modules || []
                   const blockCounts = { content: 0, image: 0, table: 0 }
                   mods.forEach(m => (m.blocks || []).forEach(b => { if (b.type in blockCounts) blockCounts[b.type as keyof typeof blockCounts]++ }))
+                  const taskCount = mods.reduce((sum, m) => sum + (m.tasks || []).length, 0)
+                  const hasAssessment = (r.assessment?.questions.length || 0) > 0
                   const subjIcon = getSubjectIcon(r.subject)
                   return (
                     <div key={r.id} className={`group rounded-2xl shadow-md overflow-hidden transition-all hover:shadow-lg hover:-translate-y-0.5 h-full flex flex-col ${isDark ? "bg-gray-800" : "bg-white"}`}>
-                      <div className={`p-6 flex-1 flex flex-col ${isDark ? "bg-gradient-to-br from-navy-500/10 to-transparent" : "bg-gradient-to-br from-navy-50 to-transparent"}`}>
-                        <div className="flex items-start gap-4 mb-4">
-                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${isDark ? "bg-navy-400/20 text-navy-400" : `${subjIcon.bg} ${subjIcon.color}`}`}>
-                            <i className={`fas ${subjIcon.icon} text-xl`} />
+                      <div className={`p-5 flex-1 flex flex-col ${isDark ? "bg-gradient-to-br from-navy-500/10 to-transparent" : "bg-gradient-to-br from-navy-50 to-transparent"}`}>
+                        <div className="flex items-start gap-3 mb-3">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isDark ? "bg-navy-400/20 text-navy-400" : `${subjIcon.bg} ${subjIcon.color}`}`}>
+                            <i className={`fas ${subjIcon.icon}`} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className={`font-bold text-lg truncate ${isDark ? "text-white" : "text-gray-800"}`}>{r.title}</h3>
-                            <p className={`text-sm mt-0.5 ${isDark ? "text-gray-500" : "text-gray-400"}`}>{r.subject}</p>
+                            <h3 className={`font-bold text-base truncate ${isDark ? "text-white" : "text-gray-800"}`}>{r.title}</h3>
+                            <p className={`text-xs mt-0.5 truncate ${isDark ? "text-gray-500" : "text-gray-400"}`}>{r.subject}</p>
                           </div>
                         </div>
-                        {r.description && <p className={`text-sm mb-4 leading-relaxed ${isDark ? "text-gray-400" : "text-gray-500"}`}>{r.description}</p>}
-                        <div className={`flex items-center gap-3 text-xs mb-4 ${isDark ? "text-gray-500" : "text-gray-400"}`}>
-                          <span className="flex items-center gap-1.5"><i className="fas fa-user-circle" />{r.uploadedBy}</span>
-                          <span className={`w-1 h-1 rounded-full ${isDark ? "bg-gray-600" : "bg-gray-300"}`} />
-                          <span className="flex items-center gap-1.5"><i className="fas fa-calendar-alt" />{date}</span>
+                        {r.description && <p className={`text-xs mb-3 truncate ${isDark ? "text-gray-400" : "text-gray-500"}`}>{r.description}</p>}
+                        <div className={`flex items-center gap-2 text-[11px] mb-3 ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                          <span className="flex items-center gap-1"><i className="fas fa-user-circle" />{r.uploadedBy}</span>
+                          <span className={`w-0.5 h-0.5 rounded-full ${isDark ? "bg-gray-600" : "bg-gray-300"}`} />
+                          <span className="flex items-center gap-1"><i className="fas fa-calendar-alt" />{date}</span>
                         </div>
-                        <div className="flex items-center gap-2 mb-5 flex-wrap">
-                          <span className={`text-xs font-semibold px-3 py-1 rounded-full ${isDark ? "bg-gray-700 text-gray-300" : "bg-gray-100 text-gray-600"}`}>
-                            <i className="fas fa-layer-group mr-1.5" />{mods.length} module{mods.length !== 1 ? "s" : ""}
+                        <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+                          <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${isDark ? "bg-gray-700 text-gray-300" : "bg-gray-100 text-gray-600"}`}>
+                            <i className="fas fa-layer-group mr-1" />{mods.length} mod{mods.length !== 1 ? "s" : ""}
                           </span>
-                          {blockCounts.content > 0 && <span className="text-xs font-semibold px-3 py-1 rounded-full bg-blue-50 text-blue-600"><i className="fas fa-align-left mr-1.5" />{blockCounts.content}</span>}
-                          {blockCounts.image > 0 && <span className="text-xs font-semibold px-3 py-1 rounded-full bg-green-50 text-green-600"><i className="fas fa-image mr-1.5" />{blockCounts.image}</span>}
-                          {blockCounts.table > 0 && <span className="text-xs font-semibold px-3 py-1 rounded-full bg-purple-50 text-purple-600"><i className="fas fa-table mr-1.5" />{blockCounts.table}</span>}
+                          {taskCount > 0 && <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600"><i className="fas fa-list-check mr-1" />{taskCount} task{taskCount !== 1 ? "s" : ""}</span>}
+                          {hasAssessment ? (
+                            <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-green-50 text-green-600"><i className="fas fa-clipboard-check mr-1" />Assessment</span>
+                          ) : (
+                            <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-600"><i className="fas fa-clipboard mr-1" />No assessment</span>
+                          )}
                         </div>
-                        <div className="flex items-center gap-3 mt-auto">
-                          <button onClick={() => setPreviewResource(r)} className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 ${isDark ? "bg-navy-500/20 text-navy-400 hover:bg-navy-500/30" : "bg-navy-50 text-navy-600 hover:bg-navy-100"}`}>
+                        <div className="flex items-center gap-2 mt-auto">
+                          <button onClick={() => setPreviewResource(r)} className={`flex-1 py-2 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5 ${isDark ? "bg-navy-500/20 text-navy-400 hover:bg-navy-500/30" : "bg-navy-50 text-navy-600 hover:bg-navy-100"}`}>
                             <i className="fas fa-eye" /> Preview
                           </button>
-                          <button onClick={() => openEditResource(r)} className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 ${isDark ? "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20" : "bg-amber-50 text-amber-600 hover:bg-amber-100"}`}>
+                          <button onClick={() => openEditResource(r)} className={`flex-1 py-2 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5 ${isDark ? "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20" : "bg-amber-50 text-amber-600 hover:bg-amber-100"}`}>
                             <i className="fas fa-edit" /> Edit
                           </button>
-                          <button onClick={() => setDeletingResourceId(r.id)} className={`py-2.5 px-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 ${isDark ? "bg-red-500/10 text-red-400 hover:bg-red-500/20" : "bg-red-50 text-red-500 hover:bg-red-100"}`}>
+                          <button onClick={() => setDeletingResourceId(r.id)} className={`py-2 px-2.5 rounded-xl text-xs font-semibold transition flex items-center justify-center ${isDark ? "bg-red-500/10 text-red-400 hover:bg-red-500/20" : "bg-red-50 text-red-500 hover:bg-red-100"}`}>
                             <i className="fas fa-trash-alt" />
                           </button>
                         </div>
