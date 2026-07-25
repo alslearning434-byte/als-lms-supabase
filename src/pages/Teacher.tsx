@@ -56,6 +56,9 @@ export default function Teacher() {
   const [colleagues, setColleagues] = useState<{ name: string; dept: string; email: string; status: string; level: string }[]>([])
   const [totalStudents, setTotalStudents] = useState(0)
   const [editingAssessmentResourceId, setEditingAssessmentResourceId] = useState<string | null>(null)
+  const [assessmentSaving, setAssessmentSaving] = useState(false)
+  const [assessmentSaved, setAssessmentSaved] = useState(false)
+  const assessmentDraftRef = useRef<Record<string, any> | null>(null)
   const [studentWorkModal, setStudentWorkModal] = useState<{ assignmentId: number; studentName: string } | null>(null)
   const [aiScore, setAiScore] = useState<number | null>(null)
   const [aiChecking, setAiChecking] = useState(false)
@@ -738,7 +741,7 @@ export default function Teacher() {
                     return (
                       <div key={r.id}
                         className={`rounded-2xl border overflow-hidden transition-all hover:shadow-md cursor-pointer ${isDark ? "bg-gray-800 border-gray-700 hover:border-gray-600" : "bg-white border-gray-200 hover:border-gray-300"}`}
-                        onClick={() => setEditingAssessmentResourceId(r.id)}>
+                        onClick={() => { assessmentDraftRef.current = r.assessment || null; setAssessmentSaved(false); setEditingAssessmentResourceId(r.id) }}>
                         <div className={`flex items-center gap-3 p-4 ${isDark ? "" : ""}`}>
                           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isDark ? "bg-navy-400/20 text-navy-400" : "bg-gradient-to-br from-amber-500 to-orange-500 text-white"}`}>
                             <i className={`fas ${hasAssessment ? "fa-clipboard-check" : "fa-clipboard-list"} text-sm`} />
@@ -809,9 +812,12 @@ export default function Teacher() {
                       <AssessmentBuilder
                         assessment={activeResource.assessment || null}
                         onChange={(ass) => {
+                          assessmentDraftRef.current = ass
+                          setAssessmentSaved(false)
                           setResources(prev => prev.map(res => res.id === activeResource.id ? { ...res, assessment: ass } : res))
                         }}
                         onRemove={() => {
+                          assessmentDraftRef.current = null
                           setResources(prev => prev.map(res => res.id === activeResource.id ? { ...res, assessment: undefined } : res))
                         }}
                         isDark={isDark}
@@ -820,18 +826,35 @@ export default function Teacher() {
                     </div>
                     {/* Modal footer */}
                     <div className={`flex items-center justify-end gap-3 px-6 py-4 border-t shrink-0 ${isDark ? "border-gray-700" : "border-gray-200"}`}>
-                      <button onClick={() => setEditingAssessmentResourceId(null)}
+                      {assessmentSaved && (
+                        <span className="text-sm text-green-600 font-medium flex items-center gap-1.5 mr-auto">
+                          <i className="fas fa-check-circle" /> Saved successfully
+                        </span>
+                      )}
+                      <button onClick={() => { setEditingAssessmentResourceId(null); assessmentDraftRef.current = null; setAssessmentSaved(false) }}
                         className={`px-4 py-2 text-sm font-medium rounded-lg transition ${isDark ? "bg-gray-700 text-gray-300 hover:bg-gray-600" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
                         Close
                       </button>
                       <button
+                        disabled={assessmentSaving}
                         onClick={async () => {
+                          setAssessmentSaving(true)
+                          setAssessmentSaved(false)
                           try {
-                            await updateDoc(doc(db, "resources", activeResource.id), { assessment: stripUndefined(activeResource.assessment || null) })
-                          } catch { /* offline */ }
+                            const draft = assessmentDraftRef.current ?? activeResource.assessment
+                            const payload = stripUndefined(draft) ?? null
+                            await updateDoc(doc(db, "resources", activeResource.id), { assessment: payload })
+                            setResources(prev => prev.map(r => r.id === activeResource.id ? { ...r, assessment: draft } : r))
+                            setAssessmentSaved(true)
+                            setTimeout(() => setAssessmentSaved(false), 3000)
+                          } catch (err) {
+                            console.error("Failed to save assessment:", err)
+                          } finally {
+                            setAssessmentSaving(false)
+                          }
                         }}
-                        className="px-5 py-2 bg-navy-500 text-white text-sm font-medium rounded-lg hover:bg-navy-600 transition flex items-center gap-2">
-                        <i className="fas fa-save text-xs" /> Save Assessment
+                        className="px-5 py-2 bg-navy-500 text-white text-sm font-medium rounded-lg hover:bg-navy-600 transition disabled:opacity-50 flex items-center gap-2">
+                        {assessmentSaving ? <><i className="fas fa-spinner fa-spin text-xs" /> Saving...</> : <><i className="fas fa-save text-xs" /> Save Assessment</>}
                       </button>
                     </div>
                   </div>
