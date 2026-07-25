@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import BlockEditor from "../components/BlockEditor"
+import AssessmentBuilder from "../components/AssessmentBuilder"
 import Sidebar from "../components/Sidebar"
 import TopBar from "../components/TopBar"
 
@@ -10,23 +11,9 @@ import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
 import { assignments } from "../data/assignments"
 import { db } from "../firebase"
-import { collection, getDocs, addDoc, updateDoc, doc } from "firebase/firestore"
-import type { NavItem, Resource, ModuleContent, ModuleBlock, TableData } from "../types"
-
-function getSubjectIcon(subject: string): { icon: string; color: string; bg: string } {
-  const s = subject.toLowerCase()
-  if (/filipino|wikang|tagalog|pagsulat|komunikasyon/.test(s)) return { icon: "fa-comments", color: "text-red-600", bg: "bg-red-100" }
-  if (/english|grammar|writing|reading|communication|oral|research/.test(s)) return { icon: "fa-language", color: "text-blue-600", bg: "bg-blue-100" }
-  if (/math|algebra|geometry|arithmetic|calculus|pre-calc|basic calc|statistics|business math/.test(s)) return { icon: "fa-calculator", color: "text-emerald-600", bg: "bg-emerald-100" }
-  if (/science|biology|chemistry|physics|earth|life science|physical science/.test(s)) return { icon: "fa-flask", color: "text-purple-600", bg: "bg-purple-100" }
-  if (/history|heograpiya|araling|panlipunan|politics|governance|social science|society|culture/.test(s)) return { icon: "fa-landmark", color: "text-amber-600", bg: "bg-amber-100" }
-  if (/technology|computer|tle|ict|livelihood|empowerment|media and information|disaster|safety/.test(s)) return { icon: "fa-laptop-code", color: "text-cyan-600", bg: "bg-cyan-100" }
-  if (/music|arts|mapeh|mape|contemporary|creative nonfiction|creative writing|humanit/.test(s)) return { icon: "fa-palette", color: "text-pink-600", bg: "bg-pink-100" }
-  if (/physical|pe |sports|health|cookery|tailoring|welding|automotive|home econ|industrial/.test(s)) return { icon: "fa-person-running", color: "text-orange-600", bg: "bg-orange-100" }
-  if (/value|moral|character|citizenship|business ethics|personal dev/.test(s)) return { icon: "fa-heart", color: "text-rose-600", bg: "bg-rose-100" }
-  if (/business|accountancy|management|abm|entrepreneur|organization/.test(s)) return { icon: "fa-briefcase", color: "text-indigo-600", bg: "bg-indigo-100" }
-  return { icon: "fa-book-open", color: "text-navy-600", bg: "bg-navy-100" }
-}
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore"
+import type { NavItem, Resource, ModuleContent, ModuleBlock, TableData, ModuleAssessment } from "../types"
+import { getSubjectIcon } from "../utils/subjectIcons"
 
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "th-large" },
@@ -68,14 +55,7 @@ export default function Teacher() {
   const [cohortCounts, setCohortCounts] = useState({ jhs: 0, shs: 0 })
   const [colleagues, setColleagues] = useState<{ name: string; dept: string; email: string; status: string; level: string }[]>([])
   const [totalStudents, setTotalStudents] = useState(0)
-  const [assessments, setAssessments] = useState<{ title: string; description: string; questions: { text: string; type: string; options: string[] }[] }[]>([])
-  const [assTitle, setAssTitle] = useState("")
-  const [assDesc, setAssDesc] = useState("")
-  const [assQuestions, setAssQuestions] = useState<{ text: string; type: string; options: string[] }[]>([])
-  const [showPreview, setShowPreview] = useState<number | null>(null)
-  const [newQText, setNewQText] = useState("")
-  const [newQType, setNewQType] = useState("Multiple Choice")
-  const [newQOptions, setNewQOptions] = useState<string[]>(["", ""])
+  const [editingAssessmentResourceId, setEditingAssessmentResourceId] = useState<string | null>(null)
   const [studentWorkModal, setStudentWorkModal] = useState<{ assignmentId: number; studentName: string } | null>(null)
   const [aiScore, setAiScore] = useState<number | null>(null)
   const [aiChecking, setAiChecking] = useState(false)
@@ -83,11 +63,29 @@ export default function Teacher() {
   const [resSubject, setResSubject] = useState("")
   const [resTitle, setResTitle] = useState("")
   const [resDesc, setResDesc] = useState("")
-  const [resModules, setResModules] = useState<ModuleContent[]>([{ name: "", description: "", blocks: [] }])
+  const [resModules, setResModules] = useState<ModuleContent[]>([{ name: "", description: "", blocks: [], tasks: [] }])
   const [resSaving, setResSaving] = useState(false)
+  const [selectedModuleIdx, setSelectedModuleIdx] = useState(0)
+  const moduleScrollRefs = useRef<(HTMLDivElement | null)[]>([])
+  const moduleScrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const sidebarItemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const [previewResource, setPreviewResource] = useState<Resource | null>(null)
   const [editingResourceId, setEditingResourceId] = useState<string | null>(null)
+  const [deletingResourceId, setDeletingResourceId] = useState<string | null>(null)
   const isDark = theme === "dark"
+
+  function stripUndefined(obj: any): any {
+    if (obj === null || obj === undefined) return undefined
+    if (Array.isArray(obj)) return obj.map(stripUndefined).filter(v => v !== undefined)
+    if (typeof obj === "object") {
+      const clean: Record<string, any> = {}
+      for (const [k, v] of Object.entries(obj)) {
+        if (v !== undefined) clean[k] = stripUndefined(v)
+      }
+      return clean
+    }
+    return obj
+  }
 
   const mockStudentWork: Record<string, string> = {
     "Juan Dela Cruz": "The quadratic formula is used to solve quadratic equations of the form ax² + bx + c = 0. The formula is x = (-b ± √(b² - 4ac)) / 2a. In this module, I learned how to apply this formula to various problems. For example, when solving x² + 5x + 6 = 0, we can factor it as (x + 2)(x + 3) = 0, giving us x = -2 and x = -3. I also practiced word problems involving quadratic equations, such as finding the dimensions of a rectangle given its area and perimeter. The key is to set up the equation correctly based on the problem statement. Understanding the discriminant b² - 4ac helps determine the nature of the roots. If it's positive, we get two real roots; if zero, one real root; if negative, complex roots.",
@@ -136,8 +134,9 @@ export default function Teacher() {
                 blocks.push({ id: `mig_${d.id}_tbl_${i}`, type: "table", topic: "", description: html })
               })
             }
-            return { name: m.name || "", description: m.description || "", blocks }
+            return { name: m.name || "", description: m.description || "", blocks, tasks: m.tasks || [] }
           }),
+          assessment: data.assessment || undefined,
         }
       })
       setResources(items)
@@ -182,19 +181,63 @@ export default function Teacher() {
     fetchCohortData()
   }, [profile?.uid])
 
+  useEffect(() => {
+    if (!resourceUploadOpen) return
+    const container = moduleScrollContainerRef.current
+    if (!container) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const idx = moduleScrollRefs.current.indexOf(entry.target as HTMLDivElement)
+            if (idx !== -1) {
+              setSelectedModuleIdx(idx)
+              break
+            }
+          }
+        }
+      },
+      { root: container, rootMargin: "-20% 0px -60% 0px", threshold: 0 }
+    )
+    const timer = setTimeout(() => {
+      moduleScrollRefs.current.forEach((el) => { if (el) observer.observe(el) })
+    }, 100)
+    return () => { clearTimeout(timer); observer.disconnect() }
+  }, [resourceUploadOpen, resModules.length])
+
+  useEffect(() => {
+    if (!resourceUploadOpen) return
+    sidebarItemRefs.current[selectedModuleIdx]?.scrollIntoView({ block: "nearest" })
+  }, [selectedModuleIdx, resourceUploadOpen])
+
   const handleResourceUpload = async () => {
-    if (!resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0 && !m.assessment)) return
+    if (!resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0)) return
     setResSaving(true)
     try {
-      const filteredModules = resModules.filter(m => m.name.trim() || m.blocks.length > 0)
-      const firestoreModules = filteredModules.map(m => ({
-        ...m,
-        blocks: m.blocks.map(b => {
-          const clean: Record<string, any> = { id: b.id, type: b.type, topic: b.topic, description: b.description }
-          if (b.type === "image" && b.imageData) clean.imageData = b.imageData
-          return clean
-        }),
-      }))
+      const filteredModules = resModules.filter(m => m.name.trim() || m.blocks.length > 0 || (m.tasks && m.tasks.length > 0))
+      const firestoreModules = filteredModules.map(m => {
+        const mod: Record<string, any> = {
+          name: m.name,
+          description: m.description,
+          blocks: m.blocks.map(b => {
+            const clean: Record<string, any> = { id: b.id, type: b.type, topic: b.topic, description: b.description }
+            if (b.type === "image" && b.imageData) clean.imageData = b.imageData
+            return clean
+          }),
+          tasks: (m.tasks || []).map(t => {
+            const clean: Record<string, any> = {
+              id: t.id, type: t.type, title: t.title, description: t.description,
+              attachments: t.attachments || [], rubric: t.rubric || [],
+              allowLateSubmission: t.allowLateSubmission, anonymous: t.anonymous,
+            }
+            if (t.dueDate) clean.dueDate = t.dueDate
+            if (t.points !== undefined) clean.points = t.points
+            if (t.assessment) clean.assessment = stripUndefined(t.assessment)
+            return clean
+          }),
+        }
+        return mod
+      })
       const payload = {
         subject: resSubject.trim(),
         title: resTitle.trim(),
@@ -202,8 +245,11 @@ export default function Teacher() {
         modules: firestoreModules,
       }
       if (editingResourceId) {
-        await updateDoc(doc(db, "resources", editingResourceId), payload)
-        setResources((prev) => prev.map(r => r.id === editingResourceId ? { ...r, ...payload, modules: filteredModules } : r))
+        const existing = resources.find(r => r.id === editingResourceId)
+        const payloadWithAssessment: Record<string, any> = { ...payload }
+        if (existing?.assessment) payloadWithAssessment.assessment = stripUndefined(existing.assessment)
+        await updateDoc(doc(db, "resources", editingResourceId), payloadWithAssessment)
+        setResources((prev) => prev.map(r => r.id === editingResourceId ? { ...r, ...payload, modules: filteredModules, assessment: existing?.assessment } : r))
       } else {
         const docRef = await addDoc(collection(db, "resources"), {
           ...payload,
@@ -227,7 +273,8 @@ export default function Teacher() {
   }
 
   const addModule = () => {
-    setResModules((prev) => [...prev, { name: "", description: "", blocks: [], assessment: undefined }])
+    setResModules((prev) => [...prev, { name: "", description: "", blocks: [], tasks: [] }])
+    setSelectedModuleIdx(resModules.length)
   }
 
   const removeModule = (index: number) => {
@@ -243,7 +290,8 @@ export default function Teacher() {
     setResSubject(resource.subject)
     setResTitle(resource.title)
     setResDesc(resource.description)
-    setResModules(resource.modules.length > 0 ? resource.modules.map(m => ({ ...m })) : [{ name: "", description: "", blocks: [] }])
+    setResModules(resource.modules.length > 0 ? resource.modules.map(m => ({ ...m, tasks: m.tasks || [] })) : [{ name: "", description: "", blocks: [], tasks: [] }])
+    setSelectedModuleIdx(0)
     setResourceUploadOpen(true)
   }
 
@@ -252,8 +300,23 @@ export default function Teacher() {
     setResSubject("")
     setResTitle("")
     setResDesc("")
-    setResModules([{ name: "", description: "", blocks: [] }])
+    setResModules([{ name: "", description: "", blocks: [], tasks: [] }])
+    setSelectedModuleIdx(0)
     setResourceUploadOpen(false)
+  }
+
+  const handleDeleteResource = async () => {
+    if (!deletingResourceId) return
+    try {
+      await deleteDoc(doc(db, "resources", deletingResourceId))
+      setResources((prev) => prev.filter((r) => r.id !== deletingResourceId))
+      if (previewResource?.id === deletingResourceId) setPreviewResource(null)
+      if (editingAssessmentResourceId === deletingResourceId) setEditingAssessmentResourceId(null)
+    } catch (err) {
+      console.error("Failed to delete resource:", err)
+    } finally {
+      setDeletingResourceId(null)
+    }
   }
 
 
@@ -264,21 +327,6 @@ export default function Teacher() {
 
   const showDetail = (id: number) => setDetailId(id)
   const backToGrid = () => setDetailId(null)
-
-  const addQuestion = () => {
-    if (!newQText.trim()) return
-    const opts = newQType === "Multiple Choice" ? newQOptions.filter((o) => o.trim()) : []
-    if (newQType === "Multiple Choice" && opts.length < 2) return
-    setAssQuestions([...assQuestions, { text: newQText.trim(), type: newQType, options: newQType === "Multiple Choice" ? opts : newQType === "True/False" ? ["True", "False"] : [] }])
-    setNewQText("")
-    setNewQOptions(["", ""])
-  }
-
-  const saveAssessment = () => {
-    if (!assTitle.trim() || assQuestions.length === 0) return
-    setAssessments([...assessments, { title: assTitle.trim(), description: assDesc.trim(), questions: assQuestions }])
-    setAssTitle(""); setAssDesc(""); setAssQuestions([]); setNewQText(""); setNewQType("Multiple Choice"); setNewQOptions(["", ""])
-  }
 
   const statusBadge = (status: string) => {
     const map: Record<string, string> = { ahead: "bg-emerald-100 text-emerald-700", "on-time": "bg-blue-100 text-blue-700", late: "bg-orange-100 text-orange-700", missing: "bg-red-100 text-red-700" }
@@ -662,163 +710,136 @@ export default function Teacher() {
           )}
 
           {/* Assessments */}
-          {activePage === "assessments" && (
+          {activePage === "assessments" && (() => {
+            const activeResource = resources.find(r => r.id === editingAssessmentResourceId)
+            return (
             <div>
               <div className="mb-6">
-                <h2 className="text-2xl font-bold text-gray-800">Assessments</h2>
-                <p className="text-gray-500 mt-1">Create and manage quizzes, exams, and activities</p>
+                <h2 className="text-2xl font-bold text-gray-800">Final Assessments</h2>
+                <p className="text-gray-500 mt-1">Create end-of-module assessments that students take after completing all blocks</p>
               </div>
 
-              {/* Create assessment form */}
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-6">
-                <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                  <i className="fas fa-plus-circle text-navy-500" /> Create New Assessment
-                </h3>
-
-                <div className="space-y-4 mb-5">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Assessment Title</label>
-                    <input type="text" value={assTitle} onChange={(e) => setAssTitle(e.target.value)}
-                      placeholder="e.g., Quarter 1 Science Exam"
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500" />
+              {resources.length === 0 ? (
+                <div className={`text-center py-20 rounded-xl border-2 border-dashed ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 ${isDark ? "bg-gray-800" : "bg-gray-100"}`}>
+                    <i className={`fas fa-clipboard-list text-2xl ${isDark ? "text-gray-600" : "text-gray-300"}`} />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                    <textarea value={assDesc} onChange={(e) => setAssDesc(e.target.value)} rows={2}
-                      placeholder="Instructions or notes for this assessment"
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 resize-none" />
-                  </div>
+                  <p className={`font-medium mb-1 ${isDark ? "text-gray-400" : "text-gray-500"}`}>No resources yet</p>
+                  <p className={`text-sm ${isDark ? "text-gray-600" : "text-gray-400"}`}>Create a resource first, then add a final assessment here</p>
                 </div>
-
-                {/* Questions */}
-                {assQuestions.length > 0 && (
-                  <div className="space-y-3 mb-5">
-                    {assQuestions.map((q, i) => (
-                      <div key={i} className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                        <div className="flex items-start justify-between mb-2">
-                          <span className="text-xs font-semibold text-gray-500 uppercase">Question {i + 1} • {q.type}</span>
-                          <button onClick={() => setAssQuestions(assQuestions.filter((_, j) => j !== i))}
-                            className="text-red-400 hover:text-red-600 text-sm transition">
-                            <i className="fas fa-trash-alt" />
-                          </button>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {resources.map((r) => {
+                    const mods = r.modules || []
+                    const totalQuestions = r.assessment?.questions.length || 0
+                    const hasAssessment = totalQuestions > 0
+                    const subjIcon = getSubjectIcon(r.subject)
+                    const taskCount = mods.reduce((sum, m) => sum + (m.tasks || []).length, 0)
+                    return (
+                      <div key={r.id}
+                        className={`rounded-2xl border overflow-hidden transition-all hover:shadow-md cursor-pointer ${isDark ? "bg-gray-800 border-gray-700 hover:border-gray-600" : "bg-white border-gray-200 hover:border-gray-300"}`}
+                        onClick={() => setEditingAssessmentResourceId(r.id)}>
+                        <div className={`flex items-center gap-3 p-4 ${isDark ? "" : ""}`}>
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isDark ? "bg-navy-400/20 text-navy-400" : "bg-gradient-to-br from-amber-500 to-orange-500 text-white"}`}>
+                            <i className={`fas ${hasAssessment ? "fa-clipboard-check" : "fa-clipboard-list"} text-sm`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h3 className={`font-bold text-sm truncate ${isDark ? "text-white" : "text-gray-800"}`}>{r.title}</h3>
+                              {hasAssessment ? (
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">{totalQuestions}q</span>
+                              ) : (
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-600 shrink-0">Empty</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className={`text-[11px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                                <i className={`fas ${subjIcon.icon} mr-0.5`} />{r.subject}
+                              </span>
+                              <span className={`w-0.5 h-0.5 rounded-full ${isDark ? "bg-gray-600" : "bg-gray-300"}`} />
+                              <span className={`text-[11px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                                {mods.length} mod{mods.length !== 1 ? "s" : ""}
+                              </span>
+                              {taskCount > 0 && (
+                                <>
+                                  <span className={`w-0.5 h-0.5 rounded-full ${isDark ? "bg-gray-600" : "bg-gray-300"}`} />
+                                  <span className={`text-[11px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                                    {taskCount} task{taskCount !== 1 ? "s" : ""}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <i className={`fas fa-arrow-right text-[11px] ${isDark ? "text-gray-600" : "text-gray-300"}`} />
                         </div>
-                        <p className="text-sm font-medium text-gray-800 mb-2">{q.text}</p>
-                        {q.type === "Multiple Choice" && (
-                          <ul className="space-y-1">
-                            {q.options.map((o, j) => (
-                              <li key={j} className="text-sm text-gray-600 flex items-center gap-2">
-                                <span className="w-5 h-5 rounded-full border border-gray-300 flex items-center justify-center text-xs text-gray-400">{String.fromCharCode(65 + j)}</span>
-                                {o}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        {q.type === "True/False" && (
-                          <div className="flex gap-3 text-sm text-gray-600">
-                            <span className="flex items-center gap-1"><i className="fas fa-check-circle text-green-500 text-xs" /> True</span>
-                            <span className="flex items-center gap-1"><i className="fas fa-times-circle text-red-500 text-xs" /> False</span>
-                          </div>
-                        )}
-                        {(q.type === "Short Answer" || q.type === "Essay") && (
-                          <div className="h-8 rounded-lg border border-dashed border-gray-300 bg-white" />
-                        )}
                       </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Add question form */}
-                <div className="bg-navy-500/5 rounded-xl p-4 border border-dashed border-navy-500/20">
-                  <h4 className="text-sm font-semibold text-gray-700 mb-3">Add a Question</h4>
-                  <div className="space-y-3">
-                    <div className="flex gap-3">
-                      <input type="text" value={newQText} onChange={(e) => setNewQText(e.target.value)}
-                        placeholder="Enter question text"
-                        className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500" />
-                      <select value={newQType} onChange={(e) => setNewQType(e.target.value)}
-                        className="px-4 py-2.5 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 appearance-none">
-                        <option value="Multiple Choice">Multiple Choice</option>
-                        <option value="True/False">True/False</option>
-                        <option value="Short Answer">Short Answer</option>
-                        <option value="Essay">Essay</option>
-                      </select>
-                    </div>
-                    {newQType === "Multiple Choice" && (
-                      <div className="space-y-2">
-                        {newQOptions.map((o, j) => (
-                          <div key={j} className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-gray-400 w-5">{String.fromCharCode(65 + j)}.</span>
-                            <input type="text" value={o} onChange={(e) => {
-                              const next = [...newQOptions]; next[j] = e.target.value; setNewQOptions(next)
-                            }} placeholder={`Option ${String.fromCharCode(65 + j)}`}
-                              className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500" />
-                            {newQOptions.length > 2 && (
-                              <button onClick={() => setNewQOptions(newQOptions.filter((_, k) => k !== j))}
-                                className="text-red-400 hover:text-red-600 text-xs"><i className="fas fa-times" /></button>
-                            )}
-                          </div>
-                        ))}
-                        <button onClick={() => setNewQOptions([...newQOptions, ""])}
-                          className="text-xs text-navy-500 font-medium hover:text-navy-600 transition flex items-center gap-1">
-                          <i className="fas fa-plus" /> Add option
-                        </button>
-                      </div>
-                    )}
-                    <button onClick={addQuestion}
-                      disabled={!newQText.trim()}
-                      className="px-5 py-2 bg-navy-500 text-white text-sm font-medium rounded-xl hover:bg-navy-600 transition disabled:opacity-50 flex items-center gap-2">
-                      <i className="fas fa-plus-circle text-xs" /> Add Question
-                    </button>
-                  </div>
+                    )
+                  })}
                 </div>
+              )}
 
-                <div className="flex gap-3 mt-6">
-                  <button onClick={saveAssessment}
-                    disabled={!assTitle.trim() || assQuestions.length === 0}
-                    className="flex-1 py-2.5 rounded-xl bg-navy-500 text-white text-sm font-medium hover:bg-navy-600 transition disabled:opacity-50 flex items-center justify-center gap-2">
-                    <i className="fas fa-save text-xs" /> Save Assessment
-                  </button>
-                  <button onClick={() => { setAssTitle(""); setAssDesc(""); setAssQuestions([]); setNewQText(""); setNewQType("Multiple Choice"); setNewQOptions(["", ""]) }}
-                    className="px-5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
-                    Clear
-                  </button>
-                </div>
-              </div>
-
-              {/* Saved assessments */}
-              {assessments.length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-                    <i className="fas fa-history text-gray-400 text-sm" /> Saved Assessments ({assessments.length})
-                  </h3>
-                  {assessments.map((a, i) => (
-                    <div key={i} className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                      <div className="flex items-start justify-between">
+              {/* Assessment Builder Modal */}
+              {activeResource && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]"
+                  onClick={() => setEditingAssessmentResourceId(null)}>
+                  <style>{`
+                    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+                    @keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+                  `}</style>
+                  <div className={`rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[90vh] flex flex-col animate-[modalIn_0.3s_ease-out] ${isDark ? "bg-gray-800 border border-gray-700" : "bg-white"}`}
+                    onClick={(e) => e.stopPropagation()}>
+                    {/* Modal header */}
+                    <div className={`flex items-center justify-between px-6 py-4 border-b shrink-0 ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isDark ? "bg-navy-400/20 text-navy-400" : "bg-gradient-to-br from-amber-500 to-orange-500 text-white"}`}>
+                          <i className="fas fa-clipboard-list text-sm" />
+                        </div>
                         <div>
-                          <h4 className="font-bold text-gray-800">{a.title}</h4>
-                          <p className="text-sm text-gray-500 mt-0.5">{a.description}</p>
-                          <p className="text-xs text-gray-400 mt-1">{a.questions.length} question{a.questions.length > 1 ? "s" : ""}</p>
-                        </div>
-                        <div className="flex gap-2">
-                          <button onClick={() => setShowPreview(i)}
-                            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition flex items-center gap-1">
-                            <i className="fas fa-eye" /> Preview
-                          </button>
-                          <button onClick={() => {
-                            setAssessments(assessments.filter((_, j) => j !== i))
-                            if (showPreview === i) setShowPreview(null)
-                          }}
-                            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition">
-                            Delete
-                          </button>
+                          <h3 className={`font-bold ${isDark ? "text-white" : "text-gray-800"}`}>{activeResource.title}</h3>
+                          <p className={`text-xs ${isDark ? "text-gray-500" : "text-gray-400"}`}>{activeResource.subject} &middot; Final Assessment</p>
                         </div>
                       </div>
+                      <button onClick={() => setEditingAssessmentResourceId(null)}
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center transition ${isDark ? "text-gray-400 hover:bg-gray-700 hover:text-white" : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"}`}>
+                        <i className="fas fa-times text-sm" />
+                      </button>
                     </div>
-                  ))}
+                    {/* Modal body */}
+                    <div className="flex-1 overflow-y-auto px-6 py-5">
+                      <AssessmentBuilder
+                        assessment={activeResource.assessment || null}
+                        onChange={(ass) => {
+                          setResources(prev => prev.map(res => res.id === activeResource.id ? { ...res, assessment: ass } : res))
+                        }}
+                        onRemove={() => {
+                          setResources(prev => prev.map(res => res.id === activeResource.id ? { ...res, assessment: undefined } : res))
+                        }}
+                        isDark={isDark}
+                        context="assessment"
+                      />
+                    </div>
+                    {/* Modal footer */}
+                    <div className={`flex items-center justify-end gap-3 px-6 py-4 border-t shrink-0 ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+                      <button onClick={() => setEditingAssessmentResourceId(null)}
+                        className={`px-4 py-2 text-sm font-medium rounded-lg transition ${isDark ? "bg-gray-700 text-gray-300 hover:bg-gray-600" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                        Close
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await updateDoc(doc(db, "resources", activeResource.id), { assessment: stripUndefined(activeResource.assessment || null) })
+                          } catch { /* offline */ }
+                        }}
+                        className="px-5 py-2 bg-navy-500 text-white text-sm font-medium rounded-lg hover:bg-navy-600 transition flex items-center gap-2">
+                        <i className="fas fa-save text-xs" /> Save Assessment
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
-          )}
+            )
+          })()}
 
           {/* Resources */}
           {activePage === "resources" && (
@@ -880,6 +901,9 @@ export default function Teacher() {
                           </button>
                           <button onClick={() => openEditResource(r)} className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 ${isDark ? "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20" : "bg-amber-50 text-amber-600 hover:bg-amber-100"}`}>
                             <i className="fas fa-edit" /> Edit
+                          </button>
+                          <button onClick={() => setDeletingResourceId(r.id)} className={`py-2.5 px-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 ${isDark ? "bg-red-500/10 text-red-400 hover:bg-red-500/20" : "bg-red-50 text-red-500 hover:bg-red-100"}`}>
+                            <i className="fas fa-trash-alt" />
                           </button>
                         </div>
                       </div>
@@ -1272,62 +1296,176 @@ export default function Teacher() {
       {/* Create/Edit Module Content Modal */}
       {resourceUploadOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { if (!resSaving) resetResourceForm() }}>
-          <div className={`rounded-2xl shadow-xl p-7 w-full max-w-4xl mx-4 max-h-[90vh] flex flex-col ${isDark ? "bg-gray-900" : "bg-white"}`} onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5 shrink-0">
-              <h3 className={`text-lg font-bold ${isDark ? "text-white" : "text-gray-800"}`}>{editingResourceId ? "Edit Module Content" : "Create Module Content"}</h3>
+          <div className={`rounded-2xl shadow-xl w-full max-w-6xl mx-4 max-h-[92vh] flex flex-col ${isDark ? "bg-gray-900" : "bg-white"}`} onClick={(e) => e.stopPropagation()}>
+
+            {/* ── Header ── */}
+            <div className={`flex items-center justify-between px-6 py-4 border-b shrink-0 ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+              <div className="flex items-center gap-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isDark ? "bg-navy-600/20" : "bg-navy-500/10"}`}>
+                  <i className={`fas fa-layer-group text-sm ${isDark ? "text-navy-400" : "text-navy-600"}`} />
+                </div>
+                <div>
+                  <h3 className={`text-base font-bold ${isDark ? "text-white" : "text-gray-800"}`}>{editingResourceId ? "Edit Module Content" : "Create Module Content"}</h3>
+                  <p className={`text-[11px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>{resModules.length} module{resModules.length !== 1 ? "s" : ""} &bull; {resSubject || "No subject"}</p>
+                </div>
+              </div>
               {!resSaving && (
                 <button onClick={resetResourceForm} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${isDark ? "bg-gray-800 hover:bg-gray-700" : "bg-gray-100 hover:bg-gray-200"}`}>
                   <i className={`fas fa-times text-sm ${isDark ? "text-gray-400" : "text-gray-500"}`} />
                 </button>
               )}
             </div>
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-              <div>
-                <label className={`text-sm font-medium mb-1.5 block ${isDark ? "text-gray-300" : "text-gray-700"}`}>Subject</label>
-                <input type="text" value={resSubject} onChange={(e) => setResSubject(e.target.value)} placeholder="e.g. English — Grammar & Composition" disabled={resSaving}
-                  className={`w-full p-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50 ${isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "border-gray-200"}`} />
-              </div>
-              <div>
-                <label className={`text-sm font-medium mb-1.5 block ${isDark ? "text-gray-300" : "text-gray-700"}`}>Title</label>
-                <input type="text" value={resTitle} onChange={(e) => setResTitle(e.target.value)} placeholder="e.g. Module 1: Sentence Structure" disabled={resSaving}
-                  className={`w-full p-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50 ${isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "border-gray-200"}`} />
-              </div>
-              <div>
-                <label className={`text-sm font-medium mb-1.5 block ${isDark ? "text-gray-300" : "text-gray-700"}`}>Description</label>
-                <textarea value={resDesc} onChange={(e) => setResDesc(e.target.value)} rows={3} placeholder="Brief description of this resource..." disabled={resSaving}
-                  className={`w-full p-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50 resize-none ${isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "border-gray-200"}`} />
+
+            {/* ── Body: Sidebar + Main ── */}
+            <div className="flex flex-1 min-h-0">
+
+              {/* ── Sidebar ── */}
+              <div className={`w-72 border-r flex flex-col shrink-0 ${isDark ? "bg-gray-950/50 border-gray-700" : "bg-gray-50 border-gray-200"}`}>
+                {/* Resource info fields in sidebar */}
+                <div className={`px-4 py-3 border-b space-y-2.5 ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+                  <div>
+                    <label className={`text-[10px] font-semibold uppercase tracking-wider block mb-1 ${isDark ? "text-gray-500" : "text-gray-400"}`}>Subject</label>
+                    <input type="text" value={resSubject} onChange={(e) => setResSubject(e.target.value)} placeholder="e.g. English" disabled={resSaving}
+                      className={`w-full px-2.5 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-1 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50 ${isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "border-gray-200 bg-white"}`} />
+                  </div>
+                  <div>
+                    <label className={`text-[10px] font-semibold uppercase tracking-wider block mb-1 ${isDark ? "text-gray-500" : "text-gray-400"}`}>Title</label>
+                    <input type="text" value={resTitle} onChange={(e) => setResTitle(e.target.value)} placeholder="Resource title" disabled={resSaving}
+                      className={`w-full px-2.5 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-1 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50 ${isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "border-gray-200 bg-white"}`} />
+                  </div>
+                </div>
+
+                {/* Module tree */}
+                <div className="flex-1 overflow-y-auto px-3 py-3">
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${isDark ? "text-gray-500" : "text-gray-400"}`}>Modules</span>
+                    {!resSaving && (
+                      <button onClick={addModule} className={`text-[10px] font-medium px-1.5 py-0.5 rounded transition ${isDark ? "text-navy-400 hover:bg-gray-800" : "text-navy-600 hover:bg-gray-200"}`}>
+                        <i className="fas fa-plus mr-0.5" />Add
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    {resModules.map((mod, idx) => {
+                      const isSelected = selectedModuleIdx === idx
+                      const modName = mod.name.trim() || `Untitled Module ${idx + 1}`
+                      const blockCount = mod.blocks.length
+                      const taskCount = (mod.tasks || []).length
+
+                      return (
+                        <div key={idx}>
+                          {/* Module header */}
+                          <button
+                            ref={(el) => { sidebarItemRefs.current[idx] = el }}
+                            onClick={() => {
+                              setSelectedModuleIdx(idx)
+                              moduleScrollRefs.current[idx]?.scrollIntoView({ behavior: "smooth", block: "start" })
+                            }}
+                            className={`w-full text-left px-2.5 py-2 rounded-lg text-xs transition group flex items-start gap-2 ${isSelected ? isDark ? "bg-navy-600/20 text-navy-300" : "bg-navy-50 text-navy-700" : isDark ? "text-gray-400 hover:bg-gray-800" : "text-gray-600 hover:bg-gray-100"}`}
+                          >
+                            <span className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 ${isSelected ? isDark ? "bg-navy-600 text-white" : "bg-navy-500 text-white" : isDark ? "bg-gray-700 text-gray-400" : "bg-gray-200 text-gray-500"}`}>
+                              {idx + 1}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className={`font-medium truncate ${isSelected ? "" : ""}`}>{modName}</p>
+                              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                {blockCount > 0 && (
+                                  <span className={`inline-flex items-center gap-0.5 text-[9px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                                    <i className="fas fa-cube" />{blockCount}
+                                  </span>
+                                )}
+                                {taskCount > 0 && (
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] text-blue-500">
+                                    <i className="fas fa-list-check" />{taskCount}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+
+                          {/* Nested content items */}
+                          {isSelected && (
+                            <div className={`ml-4 mt-1 mb-2 space-y-0.5 border-l pl-2 ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+                              {/* Blocks */}
+                              {mod.blocks.map((b, bi) => {
+                                const blockIcons: Record<string, string> = { content: "fa-align-left", image: "fa-image", table: "fa-table" }
+                                const blockColors: Record<string, string> = { content: "text-blue-400", image: "text-green-400", table: "text-purple-400" }
+                                return (
+                                  <div key={bi} className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                                    <i className={`fas ${blockIcons[b.type] || "fa-cube"} ${blockColors[b.type] || "text-gray-400"} w-3 text-center`} />
+                                    <span className="truncate">{b.topic || `Block ${bi + 1}`}</span>
+                                  </div>
+                                )
+                              })}
+
+                              {/* Tasks */}
+                              {(mod.tasks || []).map((task) => {
+                                const taskIcons: Record<string, string> = { assignment: "fa-book-open", quiz: "fa-clipboard-list", discussion: "fa-comments", material: "fa-newspaper" }
+                                const taskColors: Record<string, string> = { assignment: "text-blue-400", quiz: "text-green-400", discussion: "text-orange-400", material: "text-purple-400" }
+                                return (
+                                  <div key={task.id} className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] ${taskColors[task.type] || "text-gray-400"}`}>
+                                    <i className={`fas ${taskIcons[task.type] || "fa-list"} w-3 text-center`} />
+                                    <span className="truncate">{task.title || task.type}</span>
+                                  </div>
+                                )
+                              })}
+
+                              {blockCount === 0 && taskCount === 0 && (
+                                <p className={`text-[10px] italic px-2 py-1 ${isDark ? "text-gray-600" : "text-gray-400"}`}>No content yet</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Sidebar description field */}
+                <div className={`px-4 py-3 border-t ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+                  <label className={`text-[10px] font-semibold uppercase tracking-wider block mb-1 ${isDark ? "text-gray-500" : "text-gray-400"}`}>Description</label>
+                  <textarea value={resDesc} onChange={(e) => setResDesc(e.target.value)} rows={2} placeholder="Brief description..." disabled={resSaving}
+                    className={`w-full px-2.5 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-1 focus:ring-navy-500/20 focus:border-navy-500 disabled:bg-gray-50 resize-none ${isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "border-gray-200 bg-white"}`} />
+                </div>
               </div>
 
-              <div>
-                <label className={`text-sm font-medium mb-2 block ${isDark ? "text-gray-300" : "text-gray-700"}`}>Modules</label>
-                <div className="space-y-6">
-                  {resModules.map((mod, idx) => (
+              {/* ── Main content area ── */}
+              <div ref={moduleScrollContainerRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+                {resModules.map((mod, idx) => (
+                  <div key={idx} ref={(el) => { moduleScrollRefs.current[idx] = el }} className="scroll-mt-4">
                     <BlockEditor
-                      key={idx}
                       module={mod}
                       index={idx}
                       moduleCount={resModules.length}
                       onChange={(updated) => updateModule(idx, updated)}
-                      onRemove={() => removeModule(idx)}
+                      onRemove={() => {
+                        removeModule(idx)
+                        if (selectedModuleIdx >= resModules.length - 1) setSelectedModuleIdx(Math.max(0, resModules.length - 2))
+                      }}
                       isDark={isDark}
                     />
-                  ))}
-                </div>
+                  </div>
+                ))}
+
+                {/* Quick-add module at bottom */}
                 {!resSaving && (
                   <button onClick={addModule}
-                    className={`mt-3 w-full py-2.5 rounded-xl border-2 border-dashed text-sm font-medium transition flex items-center justify-center gap-2 ${isDark ? "border-gray-700 text-gray-400 hover:border-navy-500 hover:text-navy-400" : "border-gray-300 text-gray-500 hover:border-navy-500 hover:text-navy-600"}`}>
+                    className={`w-full py-2.5 rounded-xl border-2 border-dashed text-sm font-medium transition flex items-center justify-center gap-2 ${isDark ? "border-gray-700 text-gray-400 hover:border-navy-500 hover:text-navy-400" : "border-gray-300 text-gray-500 hover:border-navy-500 hover:text-navy-600"}`}>
                     <i className="fas fa-plus text-xs" /> Add Module
                   </button>
                 )}
               </div>
             </div>
-            <div className="flex gap-3 mt-5 shrink-0">
+
+            {/* ── Footer ── */}
+            <div className={`flex gap-3 px-6 py-4 border-t shrink-0 ${isDark ? "border-gray-700" : "border-gray-200"}`}>
               {!resSaving && (
                 <button onClick={resetResourceForm} className={`flex-1 py-2.5 rounded-xl border text-sm font-medium transition ${isDark ? "border-gray-700 text-gray-300 hover:bg-gray-800" : "border-gray-200 text-gray-700 hover:bg-gray-50"}`}>
                   Cancel
                 </button>
               )}
-              <button onClick={handleResourceUpload} disabled={resSaving || !resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0 && !m.assessment)}
+              <button onClick={handleResourceUpload} disabled={resSaving || !resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0)}
                 className="flex-1 py-2.5 rounded-xl bg-navy-500 text-white text-sm font-medium hover:bg-navy-600 transition flex items-center justify-center gap-2 disabled:opacity-70">
                 {resSaving ? <><i className="fas fa-spinner fa-spin text-xs" /> Saving...</> : <><i className="fas fa-save text-xs" /> {editingResourceId ? "Update" : "Save"}</>}
               </button>
@@ -1408,55 +1546,7 @@ export default function Teacher() {
         </div>
       )}
 
-      {/* Assessment Preview Modal */}
-      {showPreview !== null && assessments[showPreview] && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowPreview(null)}>
-          <div className="bg-white rounded-2xl shadow-xl p-7 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h3 className="text-lg font-bold text-gray-800">{assessments[showPreview].title}</h3>
-                {assessments[showPreview].description && (
-                  <p className="text-sm text-gray-500 mt-1">{assessments[showPreview].description}</p>
-                )}
-              </div>
-              <button onClick={() => setShowPreview(null)} className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition">
-                <i className="fas fa-times text-gray-500 text-sm" />
-              </button>
-            </div>
-            <div className="text-xs text-gray-400 mb-4">{assessments[showPreview].questions.length} question{assessments[showPreview].questions.length > 1 ? "s" : ""}</div>
-            <div className="space-y-4">
-              {assessments[showPreview].questions.map((q, i) => (
-                <div key={i} className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                  <p className="text-sm font-semibold text-gray-800 mb-3">{i + 1}. {q.text}</p>
-                  {q.type === "Multiple Choice" && (
-                    <div className="space-y-2">
-                      {q.options.map((o, j) => (
-                        <label key={j} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white border border-gray-100 cursor-pointer hover:bg-navy-500/5 transition">
-                          <input type="radio" name={`preview-q-${i}`} className="text-navy-500 focus:ring-navy-500/20" />
-                          <span className="text-sm text-gray-700">{o}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                  {q.type === "True/False" && (
-                    <div className="flex gap-3">
-                      {["True", "False"].map((v) => (
-                        <label key={v} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white border border-gray-100 cursor-pointer hover:bg-navy-500/5 transition">
-                          <input type="radio" name={`preview-q-${i}`} className="text-navy-500 focus:ring-navy-500/20" />
-                          <span className="text-sm text-gray-700">{v}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                  {(q.type === "Short Answer" || q.type === "Essay") && (
-                    <div className={q.type === "Essay" ? "h-24 rounded-lg border border-dashed border-gray-300 bg-white" : "h-10 rounded-lg border border-dashed border-gray-300 bg-white"} />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* End modals */}
 
       {/* Resource Preview Modal */}
       {previewResource && (
@@ -1572,6 +1662,34 @@ export default function Teacher() {
 
       <ChangePasswordModal open={pwdOpen} onClose={() => setPwdOpen(false)} />
       <LogoutModal open={logoutOpen} onCancel={() => setLogoutOpen(false)} onConfirm={() => { logout(); navigate("/"); }} />
+
+      {deletingResourceId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDeletingResourceId(null)}>
+          <div
+            className={`rounded-2xl shadow-xl w-full max-w-sm p-6 mx-4 ${isDark ? "bg-gray-800" : "bg-white"}`}
+            style={{ animation: "slideIn 0.3s cubic-bezier(0.16,1,0.3,1) forwards" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-center">
+              <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                <i className="fas fa-trash-alt text-red-500 text-xl" />
+              </div>
+              <h3 className={`text-lg font-bold mb-2 ${isDark ? "text-white" : "text-gray-800"}`}>Delete Resource?</h3>
+              <p className={`text-sm mb-6 ${isDark ? "text-gray-400" : "text-gray-500"}`}>This will permanently remove this resource and all its modules. This action cannot be undone.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setDeletingResourceId(null)}
+                  className={`flex-1 py-2.5 border text-sm font-medium rounded-xl transition ${isDark ? "border-gray-600 text-gray-300 hover:bg-gray-700" : "border-gray-200 text-gray-700 hover:bg-gray-50"}`}>
+                  Cancel
+                </button>
+                <button onClick={handleDeleteResource}
+                  className="flex-1 py-2.5 bg-red-500 text-white text-sm font-medium rounded-xl hover:bg-red-600 transition">
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

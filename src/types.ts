@@ -36,25 +36,70 @@ export interface ModuleBlock {
   imageData?: string
 }
 
-export interface ModuleContent {
-  name: string
-  description: string
-  blocks: ModuleBlock[]
-  assessment?: ModuleAssessment
-}
+export type QuestionType =
+  | "Multiple Choice"
+  | "Checkboxes"
+  | "Dropdown"
+  | "Short Answer"
+  | "Paragraph"
+  | "True/False"
+  | "File Upload"
+  | "Number"
+  | "Date"
 
 export interface AssessmentQuestion {
   id: string
   text: string
-  type: "Multiple Choice" | "True/False" | "Short Answer"
+  type: QuestionType
   options: string[]
   correctAnswer: string
+  correctAnswers?: string[]
+  required: boolean
+  placeholder?: string
+  min?: number
+  max?: number
+  accept?: string
 }
 
 export interface ModuleAssessment {
   title: string
   description: string
   questions: AssessmentQuestion[]
+  accentColor: string
+}
+
+export type TaskType = "assignment" | "quiz" | "discussion" | "material"
+
+export interface RubricItem {
+  criterion: string
+  points: number
+}
+
+export interface TaskAttachment {
+  name: string
+  url: string
+  type: string
+}
+
+export interface ModuleTask {
+  id: string
+  type: TaskType
+  title: string
+  description: string
+  dueDate?: string
+  points?: number
+  attachments: TaskAttachment[]
+  assessment?: ModuleAssessment
+  rubric: RubricItem[]
+  allowLateSubmission: boolean
+  anonymous: boolean
+}
+
+export interface ModuleContent {
+  name: string
+  description: string
+  blocks: ModuleBlock[]
+  tasks: ModuleTask[]
 }
 
 export interface Resource {
@@ -63,6 +108,7 @@ export interface Resource {
   title: string
   description: string
   modules: ModuleContent[]
+  assessment?: ModuleAssessment
   uploadedBy: string
   uploadedAt: string
 }

@@ -11,6 +11,7 @@ import { useAuth } from "../context/AuthContext"
 import { db } from "../firebase"
 import { collection, getDocs, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore"
 import type { NavItem, Resource } from "../types"
+import { getSubjectIcon } from "../utils/subjectIcons"
 
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "th-large" },
@@ -21,21 +22,6 @@ const navItems: NavItem[] = [
   { id: "calendar", label: "Calendar", icon: "calendar-alt" },
   { id: "profile", label: "Profile", icon: "user-circle" }
 ]
-
-function getSubjectIcon(subject: string): { icon: string; color: string; bg: string } {
-  const s = subject.toLowerCase()
-  if (/filipino|wikang|tagalog|pagsulat|komunikasyon/.test(s)) return { icon: "fa-comments", color: "text-red-600", bg: "bg-red-100" }
-  if (/english|grammar|writing|reading|communication|oral|research/.test(s)) return { icon: "fa-language", color: "text-blue-600", bg: "bg-blue-100" }
-  if (/math|algebra|geometry|arithmetic|calculus|pre-calc|basic calc|statistics|business math/.test(s)) return { icon: "fa-calculator", color: "text-emerald-600", bg: "bg-emerald-100" }
-  if (/science|biology|chemistry|physics|earth|life science|physical science/.test(s)) return { icon: "fa-flask", color: "text-purple-600", bg: "bg-purple-100" }
-  if (/history|heograpiya|araling|panlipunan|politics|governance|social science|society|culture/.test(s)) return { icon: "fa-landmark", color: "text-amber-600", bg: "bg-amber-100" }
-  if (/technology|computer|tle|ict|livelihood|empowerment|media and information|disaster|safety/.test(s)) return { icon: "fa-laptop-code", color: "text-cyan-600", bg: "bg-cyan-100" }
-  if (/music|arts|mapeh|mape|contemporary|creative nonfiction|creative writing|humanit/.test(s)) return { icon: "fa-palette", color: "text-pink-600", bg: "bg-pink-100" }
-  if (/physical|pe |sports|health|cookery|tailoring|welding|automotive|home econ|industrial/.test(s)) return { icon: "fa-person-running", color: "text-orange-600", bg: "bg-orange-100" }
-  if (/value|moral|character|citizenship|business ethics|personal dev/.test(s)) return { icon: "fa-heart", color: "text-rose-600", bg: "bg-rose-100" }
-  if (/business|accountancy|management|abm|entrepreneur|organization/.test(s)) return { icon: "fa-briefcase", color: "text-indigo-600", bg: "bg-indigo-100" }
-  return { icon: "fa-book-open", color: "text-navy-600", bg: "bg-navy-100" }
-}
 
 export default function Student() {
   const navigate = useNavigate()
@@ -59,7 +45,7 @@ export default function Student() {
   const [modalResource, setModalResource] = useState<Resource | null>(null)
   const [viewContent, setViewContent] = useState<{ resource: Resource; moduleIdx: number } | null>(null)
   const [progressMap, setProgressMap] = useState<Record<string, number[]>>({})
-  const [activeAssessment, setActiveAssessment] = useState<{ resourceId: string; assessmentId: string; moduleIdx: number } | null>(null)
+  const [activeAssessment, setActiveAssessment] = useState<{ resourceId: string } | null>(null)
   const [assessmentSubmissions, setAssessmentSubmissions] = useState<Record<string, { score: number; totalPoints: number }>>({})
 
   const t = (text: string): string => {
@@ -288,8 +274,7 @@ export default function Student() {
             subSnap.docs.forEach((d) => {
               const data = d.data()
               if (data.studentId === user.uid) {
-                const key = `${data.resourceId}_${data.assessmentId}`
-                subs[key] = { score: data.score, totalPoints: data.totalPoints }
+                subs[data.resourceId] = { score: data.score, totalPoints: data.totalPoints }
               }
             })
             setAssessmentSubmissions(subs)
@@ -578,7 +563,7 @@ export default function Student() {
           {activePage === "finish-modules" && (
             <div>
               <h2 className="text-2xl font-bold text-gray-800 mb-2">{t("Finish Modules")}</h2>
-              <p className="text-gray-500 text-sm mb-6">{t("Complete all modules to unlock assessments and quizzes.")}</p>
+              <p className="text-gray-500 text-sm mb-6">{t("Complete all modules to unlock tasks and final assessments.")}</p>
               {resources.length === 0 ? (
                 <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
                   <p className="font-medium text-gray-500">No modules to finish yet</p>
@@ -590,12 +575,14 @@ export default function Student() {
                     const mods = r.modules || []
                     const viewed = progressMap[r.id] || []
                     const allViewed = mods.length > 0 && viewed.length >= mods.length
-                    const modulesWithAssessment = mods.map((m, i) => ({ mod: m, idx: i })).filter(({ mod }) => mod.assessment && mod.assessment.questions.length > 0)
-                    const hasAssessments = modulesWithAssessment.length > 0
+                    const modulesWithTasks = mods.map((m, i) => ({ mod: m, idx: i })).filter(({ mod }) => (mod.tasks || []).length > 0)
+                    const hasTasks = modulesWithTasks.length > 0
+                    const hasAssessment = !!(r.assessment && r.assessment.questions.length > 0)
+                    const sub = assessmentSubmissions[r.id]
                     const pct = mods.length > 0 ? Math.round((viewed.length / mods.length) * 100) : 0
 
                     return (
-                      <div key={r.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden ${allViewed && hasAssessments ? "border-green-200" : "border-gray-200"}`}>
+                      <div key={r.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden ${allViewed && (hasTasks || hasAssessment) ? "border-green-200" : "border-gray-200"}`}>
                         <div className="p-5">
                           <div className="flex items-start gap-4">
                             <div className={`w-12 h-12 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0`}>
@@ -604,7 +591,7 @@ export default function Student() {
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
                                 <h3 className="font-semibold text-gray-800 text-lg">{r.title}</h3>
-                                {allViewed && hasAssessments && (
+                                {allViewed && (hasTasks || hasAssessment) && (
                                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
                                     <i className="fas fa-unlock mr-0.5" /> Unlocked
                                   </span>
@@ -622,51 +609,89 @@ export default function Student() {
                           </div>
                         </div>
 
-                        {hasAssessments && (
-                          <div className={`border-t px-5 py-4 ${allViewed ? "bg-green-50/50 border-green-100" : "bg-gray-50 border-gray-100"}`}>
-                            <p className={`text-xs font-semibold mb-3 ${allViewed ? "text-green-700" : "text-gray-400"}`}>
-                              <i className="fas fa-clipboard-list mr-1" />
-                              {allViewed ? "Available Assessments" : "Complete all modules to unlock assessments"}
+                        {/* Final Assessment */}
+                        {hasAssessment && (
+                          <div className={`border-t px-5 py-4 ${allViewed ? "bg-amber-50/50 border-amber-100" : "bg-gray-50 border-gray-100"}`}>
+                            <p className={`text-xs font-semibold mb-3 ${allViewed ? "text-amber-700" : "text-gray-400"}`}>
+                              <i className="fas fa-clipboard-check mr-1" />
+                              {allViewed ? "Final Assessment" : "Complete all modules to unlock the final assessment"}
+                            </p>
+                            <div className={`flex items-center gap-3 p-3 rounded-lg border transition ${sub ? "bg-green-50 border-green-200" : allViewed ? "bg-white border-gray-200 hover:border-amber-300 hover:shadow-sm cursor-pointer" : "bg-gray-100 border-gray-200 opacity-60"}`}
+                              onClick={() => { if (allViewed && !sub) setActiveAssessment({ resourceId: r.id }) }}>
+                              <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${sub ? "bg-green-500 text-white" : allViewed ? "bg-amber-100 text-amber-600" : "bg-gray-200 text-gray-400"}`}>
+                                {sub ? <i className="fas fa-check text-xs" /> : allViewed ? <i className="fas fa-play text-xs" /> : <i className="fas fa-lock text-xs" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-medium ${sub ? "text-green-700" : allViewed ? "text-gray-800" : "text-gray-400"}`}>{r.assessment!.title || `${r.title} Assessment`}</p>
+                                <p className={`text-[11px] ${sub ? "text-green-600" : "text-gray-400"}`}>
+                                  {sub ? `${sub.score}/${sub.totalPoints} (${Math.round((sub.score / sub.totalPoints) * 100)}%)` : `${r.assessment!.questions.length} question${r.assessment!.questions.length !== 1 ? "s" : ""}`}
+                                </p>
+                              </div>
+                              {sub ? (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">
+                                  <i className="fas fa-check-circle mr-0.5" />Submitted
+                                </span>
+                              ) : allViewed ? (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 shrink-0">
+                                  Start
+                                </span>
+                              ) : (
+                                <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Tasks */}
+                        {hasTasks && (
+                          <div className={`border-t px-5 py-4 ${allViewed ? "bg-blue-50/50 border-blue-100" : "bg-gray-50 border-gray-100"}`}>
+                            <p className={`text-xs font-semibold mb-3 ${allViewed ? "text-blue-700" : "text-gray-400"}`}>
+                              <i className="fas fa-list-check mr-1" />
+                              {allViewed ? "Available Tasks" : "Complete all modules to unlock tasks"}
                             </p>
                             <div className="space-y-2">
-                              {modulesWithAssessment.map(({ mod, idx }) => {
-                                const subKey = `${r.id}_${idx}`
-                                const sub = assessmentSubmissions[subKey]
+                              {modulesWithTasks.map(({ mod, idx }) => {
                                 const isViewed = viewed.includes(idx)
                                 const isUnlocked = allViewed && isViewed
-                                return (
-                                  <div key={idx} className={`flex items-center gap-3 p-3 rounded-lg border transition ${sub ? "bg-green-50 border-green-200" : isUnlocked ? "bg-white border-gray-200 hover:border-navy-300 hover:shadow-sm cursor-pointer" : "bg-gray-100 border-gray-200 opacity-60"}`}
-                                    onClick={() => { if (isUnlocked && !sub) setActiveAssessment({ resourceId: r.id, assessmentId: subKey, moduleIdx: idx }) }}>
-                                    <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${sub ? "bg-green-500 text-white" : isUnlocked ? "bg-navy-100 text-navy-600" : "bg-gray-200 text-gray-400"}`}>
-                                      {sub ? <i className="fas fa-check text-xs" /> : isUnlocked ? <i className="fas fa-play text-xs" /> : <i className="fas fa-lock text-xs" />}
+                                return (mod.tasks || []).map((task) => {
+                                  const taskTypeConfig: Record<string, { icon: string; color: string; label: string }> = {
+                                    assignment: { icon: "fa-book-open", color: "#1A73E8", label: "Assignment" },
+                                    quiz: { icon: "fa-clipboard-list", color: "#0F9D58", label: "Quiz" },
+                                    discussion: { icon: "fa-comments", color: "#E67C13", label: "Discussion" },
+                                    material: { icon: "fa-newspaper", color: "#673AB7", label: "Material" },
+                                  }
+                                  const tcfg = taskTypeConfig[task.type] || taskTypeConfig.assignment
+                                  return (
+                                    <div key={task.id} className={`flex items-center gap-3 p-3 rounded-lg border transition ${isUnlocked ? "bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm" : "bg-gray-100 border-gray-200 opacity-60"}`}>
+                                      <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: tcfg.color + "18" }}>
+                                        <i className={`fas ${tcfg.icon} text-xs`} style={{ color: tcfg.color }} />
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-medium text-gray-800">{task.title || `Module ${idx + 1} ${tcfg.label}`}</p>
+                                        <p className="text-[11px] text-gray-400">
+                                          {tcfg.label}
+                                          {task.dueDate && ` \u00B7 Due ${new Date(task.dueDate).toLocaleDateString()}`}
+                                          {task.points !== undefined && ` \u00B7 ${task.points} pts`}
+                                        </p>
+                                      </div>
+                                      {isUnlocked ? (
+                                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: tcfg.color + "18", color: tcfg.color }}>
+                                          {task.type === "material" ? "View" : "Open"}
+                                        </span>
+                                      ) : (
+                                        <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
+                                      )}
                                     </div>
-                                    <div className="flex-1 min-w-0">
-                                      <p className={`text-sm font-medium ${sub ? "text-green-700" : isUnlocked ? "text-gray-800" : "text-gray-400"}`}>{mod.assessment!.title || `Module ${idx + 1} Assessment`}</p>
-                                      <p className={`text-[11px] ${sub ? "text-green-600" : "text-gray-400"}`}>
-                                        {sub ? `${sub.score}/${sub.totalPoints} (${Math.round((sub.score / sub.totalPoints) * 100)}%)` : `${mod.assessment!.questions.length} question${mod.assessment!.questions.length !== 1 ? "s" : ""}`}
-                                      </p>
-                                    </div>
-                                    {sub ? (
-                                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">
-                                        <i className="fas fa-check-circle mr-0.5" />Submitted
-                                      </span>
-                                    ) : isUnlocked ? (
-                                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-navy-100 text-navy-600 shrink-0">
-                                        Start
-                                      </span>
-                                    ) : (
-                                      <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
-                                    )}
-                                  </div>
-                                )
+                                  )
+                                })
                               })}
                             </div>
                           </div>
                         )}
 
-                        {!hasAssessments && (
+                        {!hasTasks && !hasAssessment && (
                           <div className="border-t border-gray-100 bg-gray-50 px-5 py-3">
-                            <p className="text-xs text-gray-400"><i className="fas fa-info-circle mr-1" />No assessments added to this resource yet</p>
+                            <p className="text-xs text-gray-400"><i className="fas fa-info-circle mr-1" />No tasks or assessments added to this resource yet</p>
                           </div>
                         )}
                       </div>
@@ -1213,14 +1238,12 @@ export default function Student() {
 
       {activeAssessment && (() => {
         const r = resources.find(r => r.id === activeAssessment.resourceId)
-        if (!r) return null
-        const mod = r.modules[activeAssessment.moduleIdx]
-        if (!mod?.assessment) return null
+        if (!r?.assessment) return null
         return (
           <AssessmentTaker
             resourceId={r.id}
-            assessmentId={activeAssessment.assessmentId}
-            assessment={mod.assessment}
+            assessmentId={`${r.id}_final`}
+            assessment={r.assessment}
             studentId={user?.uid || ""}
             studentName={profile?.displayName || "Student"}
             onClose={() => setActiveAssessment(null)}
