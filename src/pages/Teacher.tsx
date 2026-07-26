@@ -27,6 +27,13 @@ const navItems: NavItem[] = [
 ]
 
 export default function Teacher() {
+  const makeEmptyModule = (): ModuleContent => ({
+    name: "",
+    description: "",
+    blocks: [{ id: `blk_${Date.now()}_init`, type: "content", topic: "", description: "" }],
+    tasks: [],
+  })
+
   const navigate = useNavigate()
   const { theme, toggle: toggleTheme } = useTheme()
   const { logout, profile, updateProfile } = useAuth()
@@ -66,7 +73,11 @@ export default function Teacher() {
   const [resSubject, setResSubject] = useState("")
   const [resTitle, setResTitle] = useState("")
   const [resDesc, setResDesc] = useState("")
-  const [resModules, setResModules] = useState<ModuleContent[]>([{ name: "", description: "", blocks: [], tasks: [] }])
+  const [resModules, setResModules] = useState<ModuleContent[]>([makeEmptyModule()])
+  const resModulesHistoryRef = useRef<ModuleContent[][]>([])
+  const resModulesHistoryIdxRef = useRef<number>(-1)
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
   const [resSaving, setResSaving] = useState(false)
   const [selectedModuleIdx, setSelectedModuleIdx] = useState(0)
   const moduleScrollRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -76,6 +87,64 @@ export default function Teacher() {
   const [editingResourceId, setEditingResourceId] = useState<string | null>(null)
   const [deletingResourceId, setDeletingResourceId] = useState<string | null>(null)
   const isDark = theme === "dark"
+
+  const modulesMissingQuiz = resModules.filter(m => {
+    const hasContent = m.name.trim() || m.blocks.length > 0
+    const hasQuiz = (m.tasks || []).some(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0)
+    return hasContent && !hasQuiz
+  })
+
+  const deepCloneModules = (modules: ModuleContent[]): ModuleContent[] =>
+    modules.map(m => ({
+      ...m,
+      blocks: m.blocks.map(b => ({ ...b })),
+      tasks: m.tasks.map(t => ({ ...t, attachments: [...t.attachments], rubric: [...t.rubric], assessment: t.assessment ? { ...t.assessment, questions: t.assessment.questions.map(q => ({ ...q })) } : undefined })),
+    }))
+
+  const pushToHistory = (modules: ModuleContent[]) => {
+    const history = resModulesHistoryRef.current
+    const idx = resModulesHistoryIdxRef.current
+    const trimmed = history.slice(0, idx + 1)
+    trimmed.push(deepCloneModules(modules))
+    if (trimmed.length > 50) trimmed.shift()
+    resModulesHistoryRef.current = trimmed
+    resModulesHistoryIdxRef.current = trimmed.length - 1
+    setCanUndo(trimmed.length > 1)
+    setCanRedo(false)
+  }
+
+  const undo = () => {
+    const history = resModulesHistoryRef.current
+    const idx = resModulesHistoryIdxRef.current
+    if (idx <= 0) return
+    const newIdx = idx - 1
+    resModulesHistoryIdxRef.current = newIdx
+    setResModules(deepCloneModules(history[newIdx]))
+    setCanUndo(newIdx > 0)
+    setCanRedo(true)
+  }
+
+  const redo = () => {
+    const history = resModulesHistoryRef.current
+    const idx = resModulesHistoryIdxRef.current
+    if (idx >= history.length - 1) return
+    const newIdx = idx + 1
+    resModulesHistoryIdxRef.current = newIdx
+    setResModules(deepCloneModules(history[newIdx]))
+    setCanUndo(true)
+    setCanRedo(newIdx < history.length - 1)
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!resourceUploadOpen) return
+      const isMod = e.metaKey || e.ctrlKey
+      if (isMod && e.key === "z" && !e.shiftKey) { e.preventDefault(); undo() }
+      else if (isMod && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); redo() }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [resourceUploadOpen])
 
   function stripUndefined(obj: any): any {
     if (obj === null || obj === undefined) return undefined
@@ -215,6 +284,7 @@ export default function Teacher() {
 
   const handleResourceUpload = async () => {
     if (!resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0)) return
+    if (modulesMissingQuiz.length > 0) return
     setResSaving(true)
     try {
       const filteredModules = resModules.filter(m => m.name.trim() || m.blocks.length > 0 || (m.tasks && m.tasks.length > 0))
@@ -276,16 +346,22 @@ export default function Teacher() {
   }
 
   const addModule = () => {
-    setResModules((prev) => [...prev, { name: "", description: "", blocks: [], tasks: [] }])
+    pushToHistory(resModules)
+    setResModules((prev) => [...prev, makeEmptyModule()])
     setSelectedModuleIdx(resModules.length)
   }
 
   const removeModule = (index: number) => {
+    pushToHistory(resModules)
     setResModules((prev) => prev.filter((_, i) => i !== index))
   }
 
   const updateModule = (index: number, updated: ModuleContent) => {
-    setResModules((prev) => prev.map((m, i) => i === index ? updated : m))
+    const prev = resModules[index]
+    if (prev && JSON.stringify(prev) !== JSON.stringify(updated)) {
+      pushToHistory(resModules)
+    }
+    setResModules((prevModules) => prevModules.map((m, i) => i === index ? updated : m))
   }
 
   const openEditResource = (resource: Resource) => {
@@ -293,7 +369,12 @@ export default function Teacher() {
     setResSubject(resource.subject)
     setResTitle(resource.title)
     setResDesc(resource.description)
-    setResModules(resource.modules.length > 0 ? resource.modules.map(m => ({ ...m, tasks: m.tasks || [] })) : [{ name: "", description: "", blocks: [], tasks: [] }])
+    const mods = resource.modules.length > 0 ? resource.modules.map(m => ({ ...m, tasks: m.tasks || [] })) : [makeEmptyModule()]
+    setResModules(mods)
+    resModulesHistoryRef.current = [deepCloneModules(mods)]
+    resModulesHistoryIdxRef.current = 0
+    setCanUndo(false)
+    setCanRedo(false)
     setSelectedModuleIdx(0)
     setResourceUploadOpen(true)
   }
@@ -303,7 +384,11 @@ export default function Teacher() {
     setResSubject("")
     setResTitle("")
     setResDesc("")
-    setResModules([{ name: "", description: "", blocks: [], tasks: [] }])
+    setResModules([makeEmptyModule()])
+    resModulesHistoryRef.current = []
+    resModulesHistoryIdxRef.current = -1
+    setCanUndo(false)
+    setCanRedo(false)
     setSelectedModuleIdx(0)
     setResourceUploadOpen(false)
   }
@@ -347,7 +432,8 @@ export default function Teacher() {
         .tiptap-preview img[data-float="left"] { float: left; margin: 0.25rem 1rem 0.5rem 0; max-width: 50%; }
         .tiptap-preview img[data-float="right"] { float: right; margin: 0.25rem 0 0.5rem 1rem; max-width: 50%; }
         .tiptap-preview table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
-        .tiptap-preview td, .tiptap-preview th { border: 1px solid #d1d5db; padding: 0.5rem; }
+        .tiptap-preview td, .tiptap-preview th { border: 1px solid #d1d5db; padding: 0.125rem 0.25rem; line-height: 1.4; }
+        .tiptap-preview td p, .tiptap-preview th p { margin: 0; }
         .tiptap-preview th { background: #f3f4f6; font-weight: 600; }
         .tiptap-preview ul { list-style-type: disc; padding-left: 1.5rem; }
         .tiptap-preview ol { list-style-type: decimal; padding-left: 1.5rem; }
@@ -872,7 +958,14 @@ export default function Teacher() {
                   <h2 className="text-2xl font-bold text-gray-800">Teaching Resources</h2>
                   <p className="text-gray-500 mt-1">Create and manage your module content</p>
                 </div>
-                <button onClick={() => setResourceUploadOpen(true)} className="px-4 py-2 bg-navy-500 text-white text-sm font-medium rounded-lg hover:bg-navy-600 transition flex items-center gap-2">
+                <button onClick={() => {
+                  const initModules = [makeEmptyModule()]
+                  resModulesHistoryRef.current = [deepCloneModules(initModules)]
+                  resModulesHistoryIdxRef.current = 0
+                  setCanUndo(false)
+                  setCanRedo(false)
+                  setResourceUploadOpen(true)
+                }} className="px-4 py-2 bg-navy-500 text-white text-sm font-medium rounded-lg hover:bg-navy-600 transition flex items-center gap-2">
                   <i className="fas fa-plus text-xs" /> Create Module
                 </button>
               </div>
@@ -1337,11 +1430,23 @@ export default function Teacher() {
                   <p className={`text-[11px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>{resModules.length} module{resModules.length !== 1 ? "s" : ""} &bull; {resSubject || "No subject"}</p>
                 </div>
               </div>
-              {!resSaving && (
-                <button onClick={resetResourceForm} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${isDark ? "bg-gray-800 hover:bg-gray-700" : "bg-gray-100 hover:bg-gray-200"}`}>
-                  <i className={`fas fa-times text-sm ${isDark ? "text-gray-400" : "text-gray-500"}`} />
-                </button>
-              )}
+              <div className="flex items-center gap-1.5">
+                {!resSaving && (
+                  <>
+                    <button onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)" className={`w-8 h-8 rounded-lg flex items-center justify-center transition disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "bg-gray-800 hover:bg-gray-700 text-gray-400" : "bg-gray-100 hover:bg-gray-200 text-gray-500"}`}>
+                      <i className="fas fa-undo text-sm" />
+                    </button>
+                    <button onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)" className={`w-8 h-8 rounded-lg flex items-center justify-center transition disabled:opacity-30 disabled:cursor-not-allowed ${isDark ? "bg-gray-800 hover:bg-gray-700 text-gray-400" : "bg-gray-100 hover:bg-gray-200 text-gray-500"}`}>
+                      <i className="fas fa-redo text-sm" />
+                    </button>
+                  </>
+                )}
+                {!resSaving && (
+                  <button onClick={resetResourceForm} className={`w-8 h-8 rounded-full flex items-center justify-center transition ${isDark ? "bg-gray-800 hover:bg-gray-700" : "bg-gray-100 hover:bg-gray-200"}`}>
+                    <i className={`fas fa-times text-sm ${isDark ? "text-gray-400" : "text-gray-500"}`} />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* ── Body: Sidebar + Main ── */}
@@ -1461,7 +1566,7 @@ export default function Teacher() {
               {/* ── Main content area ── */}
               <div ref={moduleScrollContainerRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
                 {resModules.map((mod, idx) => (
-                  <div key={idx} ref={(el) => { moduleScrollRefs.current[idx] = el }} className="scroll-mt-4">
+                  <div key={idx} ref={(el) => { moduleScrollRefs.current[idx] = el }} className="scroll-mt-4" onClick={() => setSelectedModuleIdx(idx)}>
                     <BlockEditor
                       module={mod}
                       index={idx}
@@ -1472,6 +1577,8 @@ export default function Teacher() {
                         if (selectedModuleIdx >= resModules.length - 1) setSelectedModuleIdx(Math.max(0, resModules.length - 2))
                       }}
                       isDark={isDark}
+                      subject={resSubject}
+                      isActive={selectedModuleIdx === idx}
                     />
                   </div>
                 ))}
@@ -1493,11 +1600,20 @@ export default function Teacher() {
                   Cancel
                 </button>
               )}
-              <button onClick={handleResourceUpload} disabled={resSaving || !resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0)}
+              <button onClick={handleResourceUpload} disabled={resSaving || !resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0) || modulesMissingQuiz.length > 0}
                 className="flex-1 py-2.5 rounded-xl bg-navy-500 text-white text-sm font-medium hover:bg-navy-600 transition flex items-center justify-center gap-2 disabled:opacity-70">
                 {resSaving ? <><i className="fas fa-spinner fa-spin text-xs" /> Saving...</> : <><i className="fas fa-save text-xs" /> {editingResourceId ? "Update" : "Save"}</>}
               </button>
             </div>
+            {modulesMissingQuiz.length > 0 && (
+              <div className={`flex items-start gap-2 px-4 py-2.5 rounded-xl text-xs mt-2 ${isDark ? "bg-amber-900/20 border border-amber-800/30 text-amber-300" : "bg-amber-50 border border-amber-200 text-amber-700"}`}>
+                <i className="fas fa-exclamation-triangle text-amber-500 mt-0.5" />
+                <span>
+                  <strong>Quiz required.</strong> The following module{modulesMissingQuiz.length > 1 ? "s need" : " needs"} a quiz before you can save:
+                  {" "}{modulesMissingQuiz.map(m => m.name.trim() || "Untitled").join(", ")}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}

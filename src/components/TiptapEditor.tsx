@@ -9,6 +9,7 @@ import { Link } from "@tiptap/extension-link"
 import { Placeholder } from "@tiptap/extension-placeholder"
 import { Underline } from "@tiptap/extension-underline"
 import { TextAlign } from "@tiptap/extension-text-align"
+import { Image } from "@tiptap/extension-image"
 import { Extension } from "@tiptap/core"
 
 const TabIndent = Extension.create({
@@ -75,6 +76,175 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
   const [tablePickerHover, setTablePickerHover] = useState({ row: 0, col: 0 })
   const tablePickerBtnRef = useRef<HTMLButtonElement>(null)
   const tablePickerRef = useRef<HTMLDivElement>(null)
+  const [tableCtx, setTableCtx] = useState<{ x: number; y: number } | null>(null)
+  const tableCtxRef = useRef<HTMLDivElement>(null)
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const editorRef = useRef<ReturnType<typeof useEditor>>(null)
+
+  const handleImageFile = useCallback((file: File) => {
+    const ed = editorRef.current
+    if (!ed || !file.type.startsWith("image/")) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      ed.chain().focus().setImage({ src: reader.result as string, alt: file.name }).run()
+    }
+    reader.readAsDataURL(file)
+  }, [])
+
+  const cleanWordTable = (html: string): string => {
+    const doc = new DOMParser().parseFromString(html, "text/html")
+    const table = doc.querySelector("table")
+    if (!table) return ""
+
+    const getCellStyle = (cell: Element): string => {
+      const inline = cell.getAttribute("style") || ""
+      const parts: string[] = []
+      const extract = (prop: string) => {
+        const m = inline.match(new RegExp(`${prop}\\s*:\\s*([^;]+)`, "i"))
+        if (m) parts.push(`${prop}:${m[1].trim()}`)
+      }
+      extract("text-align")
+      extract("vertical-align")
+      extract("background-color")
+      extract("background")
+      extract("width")
+      extract("border")
+      return parts.length > 0 ? ` style="${parts.join(";")}"` : ""
+    }
+
+    const ALLOWED_TAGS = /^(b|strong|i|em|u|s|sub|sup|br|span|a|small)$/
+    const cleanInline = (el: Element): string => {
+      let out = ""
+      el.childNodes.forEach((node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const text = (node.textContent || "").replace(/\s+/g, " ").trim()
+          if (text) out += (out ? " " : "") + text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+          const tag = (node as Element).tagName.toLowerCase()
+          if (tag === "table" || tag === "tr" || tag === "td" || tag === "th" || tag === "thead" || tag === "tbody" || tag === "tfoot") return
+          if (ALLOWED_TAGS.test(tag)) {
+            const inner = cleanInline(node as Element)
+            if (inner) out += `<${tag}>${inner}</${tag}>`
+          } else {
+            out += cleanInline(node as Element)
+          }
+        }
+      })
+      return out
+    }
+
+    const extractRows = (parent: Element): Element[] => {
+      const rows: Element[] = []
+      parent.childNodes.forEach((node) => {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const el = node as Element
+          const tag = el.tagName.toLowerCase()
+          if (tag === "tr") {
+            rows.push(el)
+          } else if (tag === "thead" || tag === "tbody" || tag === "tfoot") {
+            el.querySelectorAll(":scope > tr").forEach((tr) => rows.push(tr))
+          }
+        }
+      })
+      return rows
+    }
+
+    const buildTable = (tbl: Element): string => {
+      const rows = extractRows(tbl)
+      if (rows.length === 0) return ""
+
+      const hasThead = tbl.querySelector(":scope > thead") !== null
+      const hasTbody = tbl.querySelector(":scope > tbody") !== null
+      const hasTfoot = tbl.querySelector(":scope > tfoot") !== null
+
+      let out = "<table>"
+
+      if (hasThead) {
+        out += "<thead>"
+        const theadRows = extractRows(tbl.querySelector(":scope > thead")!)
+        theadRows.forEach((tr) => {
+          out += "<tr>"
+          tr.querySelectorAll(":scope > th, :scope > td").forEach((cell) => {
+            const tag = cell.tagName.toLowerCase() === "th" ? "th" : "td"
+            const colspan = parseInt(cell.getAttribute("colspan") || "1", 10)
+            const rowspan = parseInt(cell.getAttribute("rowspan") || "1", 10)
+            const cellStyle = getCellStyle(cell)
+            const attrs: string[] = []
+            if (colspan > 1) attrs.push(`colspan="${colspan}"`)
+            if (rowspan > 1) attrs.push(`rowspan="${rowspan}"`)
+            const content = cleanInline(cell)
+            out += `<${tag}${attrs.length ? " " + attrs.join(" ") : ""}${cellStyle}>${content}</${tag}>`
+          })
+          out += "</tr>"
+        })
+        out += "</thead>"
+      }
+
+      const buildBodyRows = (container: Element) => {
+        let s = ""
+        const bodyRows = extractRows(container)
+        bodyRows.forEach((tr) => {
+          s += "<tr>"
+          tr.querySelectorAll(":scope > th, :scope > td").forEach((cell) => {
+            const tag = cell.tagName.toLowerCase() === "th" ? "th" : "td"
+            const colspan = parseInt(cell.getAttribute("colspan") || "1", 10)
+            const rowspan = parseInt(cell.getAttribute("rowspan") || "1", 10)
+            const cellStyle = getCellStyle(cell)
+            const attrs: string[] = []
+            if (colspan > 1) attrs.push(`colspan="${colspan}"`)
+            if (rowspan > 1) attrs.push(`rowspan="${rowspan}"`)
+            const content = cleanInline(cell)
+            s += `<${tag}${attrs.length ? " " + attrs.join(" ") : ""}${cellStyle}>${content}</${tag}>`
+          })
+          s += "</tr>"
+        })
+        return s
+      }
+
+      if (hasTbody) {
+        tbl.querySelectorAll(":scope > tbody").forEach((tbody) => {
+          out += "<tbody>" + buildBodyRows(tbody) + "</tbody>"
+        })
+      } else if (!hasThead) {
+        out += "<tbody>" + buildBodyRows(tbl) + "</tbody>"
+      }
+
+      if (hasTfoot) {
+        out += "<tfoot>"
+        const tfootRows = extractRows(tbl.querySelector(":scope > tfoot")!)
+        tfootRows.forEach((tr) => {
+          out += "<tr>"
+          tr.querySelectorAll(":scope > th, :scope > td").forEach((cell) => {
+            const tag = cell.tagName.toLowerCase() === "th" ? "th" : "td"
+            const colspan = parseInt(cell.getAttribute("colspan") || "1", 10)
+            const rowspan = parseInt(cell.getAttribute("rowspan") || "1", 10)
+            const cellStyle = getCellStyle(cell)
+            const attrs: string[] = []
+            if (colspan > 1) attrs.push(`colspan="${colspan}"`)
+            if (rowspan > 1) attrs.push(`rowspan="${rowspan}"`)
+            const content = cleanInline(cell)
+            out += `<${tag}${attrs.length ? " " + attrs.join(" ") : ""}${cellStyle}>${content}</${tag}>`
+          })
+          out += "</tr>"
+        })
+        out += "</tfoot>"
+      }
+
+      out += "</table>"
+      return out
+    }
+
+    const tables = doc.querySelectorAll("table")
+    if (tables.length === 0) return ""
+
+    let result = ""
+    tables.forEach((tbl) => {
+      result += buildTable(tbl)
+    })
+
+    return result
+  }
 
   const editor = useEditor({
     extensions: [
@@ -88,12 +258,13 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
       TableRow,
       TableCell,
       TableHeader,
+      Image.configure({ inline: false, allowBase64: true }),
       Link.configure({
         openOnClick: false,
         HTMLAttributes: { class: "text-blue-500 underline cursor-pointer" },
       }),
       Placeholder.configure({ placeholder }),
-      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      TextAlign.configure({ types: ["heading", "paragraph", "tableCell", "tableHeader"] }),
       TabIndent,
     ],
     content,
@@ -103,11 +274,45 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
           isDark ? "text-gray-100" : "text-gray-800"
         }`,
       },
+      handlePaste: (view, event) => {
+        const html = event.clipboardData?.getData("text/html")
+        if (html && /<table[\s>]/i.test(html)) {
+          event.preventDefault()
+          const clean = cleanWordTable(html)
+          if (clean) editorRef.current?.chain().focus().insertContent(clean).run()
+          return true
+        }
+        const items = event.clipboardData?.items
+        if (!items) return false
+        for (const item of items) {
+          if (item.type.startsWith("image/")) {
+            event.preventDefault()
+            const file = item.getAsFile()
+            if (file) handleImageFile(file)
+            return true
+          }
+        }
+        return false
+      },
+      handleDrop: (view, event) => {
+        const files = event.dataTransfer?.files
+        if (!files) return false
+        for (const file of files) {
+          if (file.type.startsWith("image/")) {
+            event.preventDefault()
+            handleImageFile(file)
+            return true
+          }
+        }
+        return false
+      },
     },
     onUpdate: ({ editor: e }) => {
       onChange(e.getHTML())
     },
   })
+
+  useEffect(() => { editorRef.current = editor }, [editor])
 
   useEffect(() => {
     if (!tablePickerOpen) return
@@ -120,6 +325,17 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [tablePickerOpen])
+
+  useEffect(() => {
+    if (!tableCtx) return
+    const handleClick = (e: MouseEvent) => {
+      if (tableCtxRef.current && !tableCtxRef.current.contains(e.target as Node)) setTableCtx(null)
+    }
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") setTableCtx(null) }
+    document.addEventListener("mousedown", handleClick)
+    document.addEventListener("keydown", handleKey)
+    return () => { document.removeEventListener("mousedown", handleClick); document.removeEventListener("keydown", handleKey) }
+  }, [tableCtx])
 
   const insertTable = useCallback(
     (rows: number, cols: number) => {
@@ -207,7 +423,7 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
 
         <ToolbarDivider isDark={isDark} />
 
-        {blockType === "table" && (
+        {(blockType === "content" || blockType === "table") && (
           <>
             <ToolbarDivider isDark={isDark} />
             <div className="relative" ref={tablePickerBtnRef}>
@@ -284,6 +500,25 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
           <i className="fas fa-link text-xs" />
         </ToolbarBtn>
 
+        <ToolbarBtn
+          onClick={() => fileInputRef.current?.click()}
+          title="Insert Image"
+          isDark={isDark}
+        >
+          <i className="fas fa-image text-xs" />
+        </ToolbarBtn>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) handleImageFile(file)
+            e.target.value = ""
+          }}
+        />
+
         <ToolbarDivider isDark={isDark} />
 
         <ToolbarBtn onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()} title="Clear Formatting" isDark={isDark}>
@@ -292,7 +527,60 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
       </div>
 
       {/* Editor */}
-      <EditorContent editor={editor} />
+      <EditorContent
+        editor={editor}
+        onContextMenu={(e) => {
+          if (!editor) return
+          const isInsideTable = editor.isActive("table")
+          if (isInsideTable) {
+            e.preventDefault()
+            setTableCtx({ x: e.clientX, y: e.clientY })
+          }
+        }}
+      />
+
+      {/* Table Context Menu */}
+      {tableCtx && editor && (
+        <div className="fixed inset-0 z-[80]" onContextMenu={(e) => { e.preventDefault(); setTableCtx(null) }}>
+          <div
+            ref={tableCtxRef}
+            className={`fixed z-[81] min-w-[200px] rounded-xl border shadow-2xl py-1.5 ${isDark ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200"}`}
+            style={{ left: Math.min(tableCtx.x, window.innerWidth - 220), top: Math.min(tableCtx.y, window.innerHeight - 320) }}
+          >
+            <div className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+              Table
+            </div>
+            <div className={`my-1 border-t ${isDark ? "border-gray-700" : "border-gray-100"}`} />
+            {[
+              { icon: "fa-arrow-up", label: "Insert Row Above", action: () => { editor.chain().focus().addRowBefore().run(); setTableCtx(null) } },
+              { icon: "fa-arrow-down", label: "Insert Row Below", action: () => { editor.chain().focus().addRowAfter().run(); setTableCtx(null) } },
+              { icon: "fa-arrow-left", label: "Insert Column Left", action: () => { editor.chain().focus().addColumnBefore().run(); setTableCtx(null) } },
+              { icon: "fa-arrow-right", label: "Insert Column Right", action: () => { editor.chain().focus().addColumnAfter().run(); setTableCtx(null) } },
+              { divider: true },
+              { icon: "fa-minus", label: "Delete Row", danger: true, action: () => { editor.chain().focus().deleteRow().run(); setTableCtx(null) } },
+              { icon: "fa-minus", label: "Delete Column", danger: true, action: () => { editor.chain().focus().deleteColumn().run(); setTableCtx(null) } },
+              { icon: "fa-trash-alt", label: "Delete Table", danger: true, action: () => { editor.chain().focus().deleteTable().run(); setTableCtx(null) } },
+            ].map((item, i) => {
+              if ("divider" in item && item.divider) return <div key={i} className={`my-1 border-t ${isDark ? "border-gray-700" : "border-gray-100"}`} />
+              const mi = item as { icon: string; label: string; danger?: boolean; action: () => void }
+              return (
+                <button
+                  key={i}
+                  onClick={mi.action}
+                  className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-medium transition ${
+                    mi.danger
+                      ? isDark ? "text-red-400 hover:bg-red-900/20" : "text-red-500 hover:bg-red-50"
+                      : isDark ? "text-gray-300 hover:bg-gray-700" : "text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  <i className={`fas ${mi.icon} w-4 text-center text-[10px] ${mi.danger ? "" : isDark ? "text-gray-500" : "text-gray-400"}`} />
+                  {mi.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Tiptap styles */}
       <style>{`
@@ -304,9 +592,12 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
         .tiptap ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
         .tiptap blockquote { border-left: 3px solid #d1d5db; padding-left: 0.75rem; margin: 0.5rem 0; color: #6b7280; font-style: italic; }
         .tiptap a { color: #2563eb; text-decoration: underline; }
-        .tiptap table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; table-layout: fixed; }
-        .tiptap td, .tiptap th { border: 1px solid #d1d5db; padding: 0.5rem; position: relative; min-width: 60px; }
+        .tiptap table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; table-layout: auto; }
+        .tiptap td, .tiptap th { border: 1px solid #d1d5db; padding: 0.125rem 0.25rem; position: relative; line-height: 1.4; }
+        .tiptap td p, .tiptap th p { margin: 0; }
         .tiptap th { background: #f3f4f6; font-weight: 600; }
+        .tiptap img { max-width: 100%; height: auto; border-radius: 0.5rem; margin: 0.5rem 0; cursor: pointer; }
+        .tiptap img.ProseMirror-selectednode { outline: 2px solid #3b82f6; outline-offset: 2px; }
         .tiptap .selectedCell::after { content: ""; position: absolute; inset: 0; background: rgba(30, 58, 95, 0.1); pointer-events: none; }
         .tiptap .column-resize-handle { position: absolute; right: -2px; top: 0; bottom: 0; width: 4px; background: #3b82f6; cursor: col-resize; }
         .tiptap p.is-editor-empty:first-child::before {

@@ -9,7 +9,7 @@ import AssessmentTaker from "../components/AssessmentTaker"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
 import { db } from "../firebase"
-import { collection, getDocs, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore"
+import { collection, getDocs, doc, getDoc, setDoc, addDoc, serverTimestamp } from "firebase/firestore"
 import type { NavItem, Resource } from "../types"
 import { getSubjectIcon } from "../utils/subjectIcons"
 
@@ -538,7 +538,7 @@ export default function Student() {
               <h2 className="text-2xl font-bold text-gray-800">{t("My Modules")}</h2>
               <p className="text-gray-500 mt-1 mb-6">{t("Access your learning materials and lessons")}</p>
               <ModuleModal resource={modalResource} viewedModules={modalResource ? (progressMap[modalResource.id] || []) : []} onClose={() => setModalResource(null)} onViewContent={(r, idx) => { setModalResource(null); setViewContent({ resource: r, moduleIdx: idx }) }} onToggleUnread={(resourceId, moduleIdx) => markModuleUnread(resourceId, moduleIdx)} t={t} />
-              <ModuleViewer data={viewContent} viewedModules={viewContent ? (progressMap[viewContent.resource.id] || []) : []} onBack={() => { setViewContent(null) }} onNavigate={(idx) => { setViewContent(prev => prev ? { ...prev, moduleIdx: idx } : null) }} onMarkViewed={(resourceId, moduleIdx) => markModuleViewed(resourceId, moduleIdx)} t={t} />
+              <ModuleViewer data={viewContent} viewedModules={viewContent ? (progressMap[viewContent.resource.id] || []) : []} onBack={() => { setViewContent(null) }} onNavigate={(idx) => { setViewContent(prev => prev ? { ...prev, moduleIdx: idx } : null) }} onMarkViewed={(resourceId, moduleIdx) => markModuleViewed(resourceId, moduleIdx)} user={user} t={t} />
               {resources.length === 0 ? (
                 <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 bg-gray-100">
@@ -1441,13 +1441,16 @@ function ModuleModal({ resource, viewedModules, onClose, onViewContent, onToggle
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-semibold text-gray-800 group-hover:text-navy-600 transition truncate">{m.name || `Module ${i + 1}`}</span>
                           {isViewed && (
-                            <button
+                            <span
                               onClick={(e) => { e.stopPropagation(); onToggleUnread(resource.id, i) }}
                               className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-green-50 text-green-600 shrink-0 hover:bg-amber-50 hover:text-amber-600 transition cursor-pointer"
                               title="Mark as unread"
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); onToggleUnread(resource.id, i) } }}
                             >
                               <i className="fas fa-check-circle mr-0.5" />Viewed
-                            </button>
+                            </span>
                           )}
                           {!isViewed && hasContent && (
                             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 shrink-0">
@@ -1499,20 +1502,20 @@ function ModuleModal({ resource, viewedModules, onClose, onViewContent, onToggle
   )
 }
 
-function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, t }: {
+function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, user, t }: {
   data: { resource: Resource; moduleIdx: number } | null
   viewedModules: number[]
   onBack: () => void
   onNavigate: (moduleIdx: number) => void
   onMarkViewed: (resourceId: string, moduleIdx: number) => void
+  user: { uid: string; displayName?: string | null; email?: string | null } | null
   t: (text: string) => string
 }) {
   const [confirmNav, setConfirmNav] = useState<null | { target: number | "back" }>(null)
-  const [quizState, setQuizState] = useState<"generating" | "active" | "passed" | "failed" | null>(null)
-  const [moduleQuiz, setModuleQuiz] = useState<{ id: string; text: string; type: string; options: string[] }[]>([])
+  const [quizState, setQuizState] = useState<"active" | "passed" | "failed" | null>(null)
+  const [moduleQuiz, setModuleQuiz] = useState<{ id: string; text: string; type: string; options: string[]; correctAnswer: string }[]>([])
   const [moduleQuizAnswers, setModuleQuizAnswers] = useState<Record<string, string>>({})
   const [moduleQuizScore, setModuleQuizScore] = useState<{ score: number; total: number } | null>(null)
-  const [quizError, setQuizError] = useState("")
   const quizNavTarget = useRef<number | "back" | null>(null)
 
   if (!data) return null
@@ -1525,38 +1528,32 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, t
   const blockTypeCounts = { content: 0, image: 0, table: 0 }
   ;(mod.blocks || []).forEach(b => { if (b.type in blockTypeCounts) blockTypeCounts[b.type as keyof typeof blockTypeCounts]++ })
 
-  const generateQuiz = async (navTarget: number | "back") => {
+  const loadModuleQuiz = (navTarget: number | "back") => {
     quizNavTarget.current = navTarget
-    setQuizState("generating")
-    setQuizError("")
     setModuleQuizAnswers({})
     setModuleQuizScore(null)
-    try {
-      const res = await fetch("http://localhost:3001/api/generate-quiz", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          moduleTitle: mod.name || `Module ${data.moduleIdx + 1}`,
-          moduleDescription: mod.description || "",
-          subject: data.resource.subject || "",
-          blocks: (mod.blocks || []).map(b => ({ topic: b.topic || "", description: b.description || "" })),
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Quiz generation failed" }))
-        throw new Error(err.error || "Quiz generation failed")
+
+    const quizTask = (mod.tasks || []).find(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0)
+    if (!quizTask || !quizTask.assessment) {
+      if (data) onMarkViewed(data.resource.id, data.moduleIdx)
+      if (navTarget !== null) {
+        if (navTarget === "back") onBack()
+        else onNavigate(navTarget)
       }
-      const result = await res.json()
-      if (!result.questions || result.questions.length === 0) throw new Error("No questions generated")
-      setModuleQuiz(result.questions)
-      setQuizState("active")
-    } catch (err) {
-      setQuizError(err instanceof Error ? err.message : "Failed to generate quiz")
-      setQuizState("failed")
+      return
     }
+
+    setModuleQuiz(quizTask.assessment.questions.map(q => ({
+      id: q.id,
+      text: q.text,
+      type: q.type,
+      options: q.options,
+      correctAnswer: q.correctAnswer,
+    })))
+    setQuizState("active")
   }
 
-  const gradeQuiz = () => {
+  const gradeQuiz = async () => {
     let correct = 0
     moduleQuiz.forEach(q => {
       if (moduleQuizAnswers[q.id] === q.correctAnswer) correct++
@@ -1568,13 +1565,32 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, t
     } else {
       setQuizState("failed")
     }
+    try {
+      const quizTask = (mod.tasks || []).find(t => t.type === "quiz" && t.assessment)
+      await addDoc(collection(db, "quizSubmissions"), {
+        resourceId: data.resource.id,
+        moduleIdx: data.moduleIdx,
+        moduleId: `${data.resource.id}_${data.moduleIdx}`,
+        studentId: user?.uid || "",
+        studentName: user?.displayName || user?.email || "",
+        quizTitle: quizTask?.assessment?.title || mod.name || `Module ${data.moduleIdx + 1}`,
+        score: correct,
+        total: moduleQuiz.length,
+        percentage: score,
+        answers: moduleQuizAnswers,
+        passed: score >= 60,
+        submittedAt: serverTimestamp(),
+      })
+    } catch (err) {
+      console.error("Failed to save quiz result:", err)
+    }
   }
 
   const handleConfirmMarkRead = () => {
     const navTarget = confirmNav ? confirmNav.target : null
     setConfirmNav(null)
     if (data && !viewedModules.includes(data.moduleIdx)) {
-      generateQuiz(navTarget ?? "back")
+      loadModuleQuiz(navTarget ?? "back")
     } else {
       if (data) onMarkViewed(data.resource.id, data.moduleIdx)
       if (navTarget !== null) {
@@ -1597,7 +1613,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, t
 
   const handleQuizRetry = () => {
     const target = quizNavTarget.current
-    if (target !== null) generateQuiz(target)
+    if (target !== null) loadModuleQuiz(target)
   }
 
   const handleConfirmSkip = () => {
@@ -1752,7 +1768,8 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, t
         .tiptap-preview img[data-float="left"] { float: left; margin: 0.25rem 1rem 0.5rem 0; max-width: 50%; }
         .tiptap-preview img[data-float="right"] { float: right; margin: 0.25rem 0 0.5rem 1rem; max-width: 50%; }
         .tiptap-preview table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
-        .tiptap-preview td, .tiptap-preview th { border: 1px solid #d1d5db; padding: 0.5rem; }
+        .tiptap-preview td, .tiptap-preview th { border: 1px solid #d1d5db; padding: 0.125rem 0.25rem; line-height: 1.4; }
+        .tiptap-preview td p, .tiptap-preview th p { margin: 0; }
         .tiptap-preview th { background: #f3f4f6; font-weight: 600; }
         .tiptap-preview ul { list-style-type: disc; padding-left: 1.5rem; }
         .tiptap-preview ol { list-style-type: decimal; padding-left: 1.5rem; }
@@ -1761,7 +1778,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, t
         .tiptap-preview p { margin: 0.25rem 0; }
       `}</style>
 
-      {/* AI Quiz Overlay */}
+      {/* Module Quiz Overlay */}
       {quizState && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div
@@ -1769,50 +1786,13 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, t
             style={{ animation: "slideIn 0.3s cubic-bezier(0.16,1,0.3,1) forwards" }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Generating state */}
-            {quizState === "generating" && (
-              <div className="flex flex-col items-center justify-center py-16 px-8">
-                <div className="w-16 h-16 rounded-2xl bg-navy-50 flex items-center justify-center mb-5">
-                  <i className="fas fa-robot text-2xl text-navy-500 animate-pulse" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-800 mb-2">Generating Quiz</h3>
-                <p className="text-sm text-gray-400 text-center">AI is analyzing your module content and creating questions...</p>
-                <div className="mt-6 flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-navy-400 animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <div className="w-2 h-2 rounded-full bg-navy-400 animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <div className="w-2 h-2 rounded-full bg-navy-400 animate-bounce" style={{ animationDelay: "300ms" }} />
-                </div>
-              </div>
-            )}
-
-            {/* Error / retry state */}
-            {quizState === "failed" && !moduleQuizScore && (
-              <div className="flex flex-col items-center justify-center py-16 px-8">
-                <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mb-5">
-                  <i className="fas fa-exclamation-triangle text-2xl text-red-400" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-800 mb-2">Quiz Generation Failed</h3>
-                <p className="text-sm text-gray-400 text-center mb-6">{quizError || "Something went wrong. Please try again."}</p>
-                <div className="flex gap-3">
-                  <button onClick={handleQuizRetry}
-                    className="px-5 py-2.5 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition">
-                    <i className="fas fa-redo mr-1.5 text-xs" />Try Again
-                  </button>
-                  <button onClick={() => { quizNavTarget.current = null; setQuizState(null) }}
-                    className="px-5 py-2.5 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition">
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
             {/* Active quiz */}
             {quizState === "active" && (
               <>
                 <div className="bg-gradient-to-br from-navy-500 to-navy-600 px-6 py-5 text-white shrink-0">
                   <div className="flex items-center gap-3 mb-2">
                     <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                      <i className="fas fa-robot text-white" />
+                      <i className="fas fa-clipboard-list text-white" />
                     </div>
                     <div>
                       <p className="text-[11px] font-medium opacity-70">Module Quiz</p>
@@ -1934,7 +1914,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, t
                   <h3 className="text-base font-bold leading-tight">{mod.name || `Module ${data.moduleIdx + 1}`}</h3>
                 </div>
               </div>
-              <p className="text-xs opacity-80 leading-relaxed">{viewedModules.includes(data.moduleIdx) ? "You've already completed this module." : "Take a short AI quiz to complete this module and move on."}</p>
+              <p className="text-xs opacity-80 leading-relaxed">{viewedModules.includes(data.moduleIdx) ? "You've already completed this module." : ((mod.tasks || []).some(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0) ? "Take the module quiz to complete this module and move on." : "Mark this module as completed to move on.")}</p>
             </div>
 
             {/* Progress context */}
@@ -1953,7 +1933,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, t
               <div className="flex flex-col gap-2.5">
                 <button onClick={handleConfirmMarkRead}
                   className="w-full py-3 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center justify-center gap-2 shadow-sm shadow-navy-500/20">
-                  <i className="fas fa-robot text-xs" /> {viewedModules.includes(data.moduleIdx) ? "Continue" : "Take Quiz & Continue"}
+                  <i className={`fas ${(mod.tasks || []).some(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0) ? "fa-clipboard-list" : "fa-check-circle"} text-xs`} /> {viewedModules.includes(data.moduleIdx) ? "Continue" : ((mod.tasks || []).some(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0) ? "Take Quiz & Continue" : "Mark Complete & Continue")}
                 </button>
                 <button onClick={handleConfirmSkip}
                   className="w-full py-3 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition flex items-center justify-center gap-2">

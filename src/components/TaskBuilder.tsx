@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { ModuleTask, TaskType, RubricItem, TaskAttachment } from "../types"
+import type { ModuleTask, TaskType, RubricItem, TaskAttachment, ModuleBlock, AssessmentQuestion } from "../types"
 import AssessmentBuilder from "./AssessmentBuilder"
 
 const TASK_TYPES: { type: TaskType; icon: string; label: string; desc: string; color: string }[] = [
@@ -34,11 +34,23 @@ interface Props {
   tasks: ModuleTask[]
   onChange: (tasks: ModuleTask[]) => void
   isDark?: boolean
+  moduleData?: { name: string; description: string; blocks: ModuleBlock[]; subject: string }
 }
 
-export default function TaskBuilder({ tasks, onChange, isDark }: Props) {
+interface AIQuizQuestion {
+  id: string
+  text: string
+  type: string
+  options: string[]
+  correctAnswer: string
+  required?: boolean
+}
+
+export default function TaskBuilder({ tasks, onChange, isDark, moduleData }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [typeMenuOpen, setTypeMenuOpen] = useState(false)
+  const [aiGenerating, setAiGenerating] = useState<string | null>(null)
+  const [aiError, setAiError] = useState<string | null>(null)
 
   const addTask = (type: TaskType) => {
     const task = makeTask(type)
@@ -141,7 +153,82 @@ export default function TaskBuilder({ tasks, onChange, isDark }: Props) {
                 {/* Type-specific editors */}
                 {task.type === "quiz" && task.assessment && (
                   <div>
-                    <label className={`text-xs font-semibold uppercase tracking-wider mb-2 block ${isDark ? "text-gray-500" : "text-gray-400"}`}>Quiz Questions</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className={`text-xs font-semibold uppercase tracking-wider ${isDark ? "text-gray-500" : "text-gray-400"}`}>Quiz Questions</label>
+                      <button
+                        onClick={async () => {
+                          if (!moduleData) return
+                          setAiGenerating(task.id)
+                          setAiError(null)
+                          try {
+                            const res = await fetch("http://localhost:3001/api/generate-quiz", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                moduleTitle: moduleData.name || "Untitled Module",
+                                moduleDescription: moduleData.description || "",
+                                subject: moduleData.subject || "",
+                                blocks: moduleData.blocks.map(b => ({ topic: b.topic || "", description: b.description || "" })),
+                              }),
+                            })
+                            if (!res.ok) {
+                              const err = await res.json().catch(() => ({ error: "Generation failed" }))
+                              throw new Error(err.error || "Generation failed")
+                            }
+                            const data = await res.json()
+                            if (!data.questions || data.questions.length === 0) throw new Error("No questions generated")
+                            const newQuestions: AssessmentQuestion[] = data.questions.map((q: AIQuizQuestion) => ({
+                              id: q.id || `q_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                              text: q.text || "",
+                              type: q.type === "True/False" ? "True/False" as const : "Multiple Choice" as const,
+                              options: Array.isArray(q.options) ? q.options : ["True", "False"],
+                              correctAnswer: q.correctAnswer || "",
+                              required: q.required !== false,
+                            }))
+                            updateTask(task.id, {
+                              assessment: {
+                                ...task.assessment,
+                                title: task.assessment.title || moduleData.name || "Module Quiz",
+                                questions: [...task.assessment.questions, ...newQuestions],
+                                accentColor: task.assessment.accentColor || "#0F9D58",
+                                quizSource: "ai",
+                              }
+                            })
+                          } catch (err) {
+                            setAiError(err instanceof Error ? err.message : "Failed to generate quiz")
+                          } finally {
+                            setAiGenerating(null)
+                          }
+                        }}
+                        disabled={aiGenerating !== null || !moduleData || moduleData.blocks.length === 0}
+                        className={`text-[11px] font-medium px-3 py-1.5 rounded-lg border transition flex items-center gap-1.5 ${
+                          aiGenerating !== null
+                            ? "opacity-50 cursor-not-allowed "
+                            : ""
+                        }${isDark ? "border-purple-700 text-purple-400 hover:bg-purple-900/20" : "border-purple-200 text-purple-600 hover:bg-purple-50"}`}
+                      >
+                        {aiGenerating === task.id ? (
+                          <><i className="fas fa-spinner fa-spin text-[10px]" /> Generating...</>
+                        ) : (
+                          <><i className="fas fa-wand-magic-sparkles text-[10px]" /> Generate with AI</>
+                        )}
+                      </button>
+                    </div>
+                    {aiError && (
+                      <p className="text-[11px] text-red-500 mb-2 flex items-center gap-1">
+                        <i className="fas fa-exclamation-circle" /> {aiError}
+                        <button onClick={() => setAiError(null)} className="ml-1 text-gray-400 hover:text-gray-600"><i className="fas fa-times" /></button>
+                      </p>
+                    )}
+                    {aiGenerating === task.id && (
+                      <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border mb-2 ${isDark ? "bg-purple-900/10 border-purple-800/30" : "bg-purple-50 border-purple-200"}`}>
+                        <i className="fas fa-spinner fa-spin text-purple-500" />
+                        <div>
+                          <p className={`text-xs font-medium ${isDark ? "text-purple-300" : "text-purple-700"}`}>Generating quiz questions...</p>
+                          <p className={`text-[10px] ${isDark ? "text-purple-400" : "text-purple-500"}`}>AI is analyzing module content</p>
+                        </div>
+                      </div>
+                    )}
                     <AssessmentBuilder
                       assessment={task.assessment}
                       onChange={(ass) => updateTask(task.id, { assessment: ass })}

@@ -66,6 +66,7 @@ export interface ModuleAssessment {
   description: string
   questions: AssessmentQuestion[]
   accentColor: string
+  quizSource?: "manual" | "ai"
 }
 
 export type TaskType = "assignment" | "quiz" | "discussion" | "material"
