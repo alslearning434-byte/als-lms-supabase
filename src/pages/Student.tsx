@@ -47,6 +47,8 @@ export default function Student() {
   const [progressMap, setProgressMap] = useState<Record<string, number[]>>({})
   const [activeAssessment, setActiveAssessment] = useState<{ resourceId: string } | null>(null)
   const [assessmentSubmissions, setAssessmentSubmissions] = useState<Record<string, { score: number; totalPoints: number }>>({})
+  const [quizSubmissions, setQuizSubmissions] = useState<Record<string, { score: number; total: number; passed: boolean }>>({})
+  const [expandedCard, setExpandedCard] = useState<string | null>(null)
 
   const t = (text: string): string => {
     if (language !== "tl") return text
@@ -279,6 +281,20 @@ export default function Student() {
               }
             })
             setAssessmentSubmissions(subs)
+          } catch { /* offline */ }
+          try {
+            const qSnap = await getDocs(collection(db, "quizSubmissions"))
+            const qsubs: Record<string, { score: number; total: number; passed: boolean }> = {}
+            qSnap.docs.forEach((d) => {
+              const data = d.data()
+              if (data.studentId === user.uid) {
+                const key = `${data.resourceId}_${data.moduleIdx}`
+                if (!qsubs[key] || data.passed) {
+                  qsubs[key] = { score: data.score, total: data.total, passed: data.passed }
+                }
+              }
+            })
+            setQuizSubmissions(qsubs)
           } catch { /* offline */ }
         }
       } catch (err) {
@@ -580,13 +596,13 @@ export default function Student() {
           {activePage === "finish-modules" && (
             <div>
               <h2 className="text-2xl font-bold text-gray-800 mb-2">{t("Finish Modules")}</h2>
-              <p className="text-gray-500 text-sm mb-6">{t("Complete all modules to unlock tasks and final assessments.")}</p>
+              <p className="text-gray-500 text-sm mb-6">{t("Unlock activities, tasks, quizzes, and assignments by completing each module.")}</p>
               {resources.length === 0 ? (
                 <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
                   <p className="font-medium text-gray-500">No modules to finish yet</p>
                 </div>
               ) : (
-                <div className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {resources.map((r) => {
                     const subjIcon = getSubjectIcon(r.subject)
                     const mods = r.modules || []
@@ -596,119 +612,255 @@ export default function Student() {
                     const hasTasks = modulesWithTasks.length > 0
                     const hasAssessment = !!(r.assessment && r.assessment.questions.length > 0)
                     const sub = assessmentSubmissions[r.id]
-                    const pct = mods.length > 0 ? Math.round((viewed.length / mods.length) * 100) : 0
+                    const isExpanded = expandedCard === r.id
+                    const hasContent = hasTasks || hasAssessment
+                    const quizCount = mods.reduce((acc, m) => acc + (m.tasks || []).filter(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0).length, 0)
+                    const taskCount = mods.reduce((acc, m) => acc + (m.tasks || []).filter(t => t.type !== "quiz").length, 0)
+                    const doneQuizzes = mods.reduce((acc, m, i) => {
+                      const key = `${r.id}_${i}`
+                      return acc + (quizSubmissions[key]?.passed ? 1 : 0)
+                    }, 0)
 
                     return (
-                      <div key={r.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden ${allViewed && (hasTasks || hasAssessment) ? "border-green-200" : "border-gray-200"}`}>
-                        <div className="p-5">
-                          <div className="flex items-start gap-4">
-                            <div className={`w-12 h-12 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0`}>
-                              <i className={`fas ${subjIcon.icon} text-xl`} />
+                      <div key={r.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 ${isExpanded ? "sm:col-span-2 lg:col-span-3 shadow-md" : ""} ${allViewed && hasContent ? "border-green-200" : "border-gray-200"}`}>
+                        <div
+                          className={`p-4 ${allViewed && hasContent ? "cursor-pointer hover:bg-gray-50/50 transition-colors" : ""}`}
+                          onClick={() => allViewed && hasContent ? setExpandedCard(isExpanded ? null : r.id) : undefined}
+                        >
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className={`w-11 h-11 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0`}>
+                              <i className={`fas ${subjIcon.icon} text-lg`} />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <h3 className="font-semibold text-gray-800 text-lg">{r.title}</h3>
-                                {allViewed && (hasTasks || hasAssessment) && (
-                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
-                                    <i className="fas fa-unlock mr-0.5" /> Unlocked
-                                  </span>
-                                )}
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <h3 className="font-semibold text-gray-800 truncate">{r.title}</h3>
                               </div>
-                              <p className="text-xs text-gray-400 mb-3">{r.subject} &bull; {mods.length} module{mods.length !== 1 ? "s" : ""}</p>
-                              <div className="flex items-center gap-3 mb-1">
-                                <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                                  <div className={`h-full rounded-full transition-all duration-500 ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-navy-500" : "bg-gray-300"}`} style={{ width: `${pct}%` }} />
-                                </div>
-                                <span className="text-xs font-bold text-gray-600 shrink-0">{viewed.length}/{mods.length}</span>
-                              </div>
-                              <p className="text-[11px] text-gray-400">{allViewed ? "All modules completed" : `${mods.length - viewed.length} module${mods.length - viewed.length !== 1 ? "s" : ""} remaining`}</p>
+                              <p className="text-xs text-gray-400 mb-1">{r.subject}</p>
+                              {r.description && <p className="text-[11px] text-gray-400 line-clamp-2 leading-relaxed">{r.description}</p>}
+                            </div>
+                            <div className="flex flex-col items-end gap-1.5 shrink-0">
+                              {allViewed && hasContent ? (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
+                                  <i className="fas fa-unlock mr-0.5" />Unlocked
+                                </span>
+                              ) : !allViewed ? (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
+                                  <i className="fas fa-lock mr-0.5" />Locked
+                                </span>
+                              ) : null}
+                              {allViewed && hasContent && (
+                                <i className={`fas fa-chevron-${isExpanded ? "up" : "down"} text-gray-400 text-xs transition-transform`} />
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 mb-2.5">
+                            {mods.map((_, i) => {
+                              const isDone = viewed.includes(i)
+                              return (
+                                <div key={i} className={`flex-1 h-1.5 rounded-full transition-colors ${isDone ? "bg-green-400" : "bg-gray-200"}`} title={`Module ${i + 1}${isDone ? " (done)" : ""}`} />
+                              )
+                            })}
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-gray-500 font-medium">{viewed.length}/{mods.length} modules</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              {quizCount > 0 && (
+                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${doneQuizzes === quizCount ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-500"}`}>
+                                  <i className="fas fa-clipboard-list mr-0.5" />{doneQuizzes}/{quizCount} quizzes
+                                </span>
+                              )}
+                              {taskCount > 0 && (
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
+                                  <i className="fas fa-list-check mr-0.5" />{taskCount} tasks
+                                </span>
+                              )}
+                              {hasAssessment && (
+                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${sub ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-500"}`}>
+                                  <i className="fas fa-clipboard-check mr-0.5" />assessment
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
 
-                        {/* Final Assessment */}
-                        {hasAssessment && (
-                          <div className={`border-t px-5 py-4 ${allViewed ? "bg-amber-50/50 border-amber-100" : "bg-gray-50 border-gray-100"}`}>
-                            <p className={`text-xs font-semibold mb-3 ${allViewed ? "text-amber-700" : "text-gray-400"}`}>
-                              <i className="fas fa-clipboard-check mr-1" />
-                              {allViewed ? "Final Assessment" : "Complete all modules to unlock the final assessment"}
-                            </p>
-                            <div className={`flex items-center gap-3 p-3 rounded-lg border transition ${sub ? "bg-green-50 border-green-200" : allViewed ? "bg-white border-gray-200 hover:border-amber-300 hover:shadow-sm cursor-pointer" : "bg-gray-100 border-gray-200 opacity-60"}`}
-                              onClick={() => { if (allViewed && !sub) setActiveAssessment({ resourceId: r.id }) }}>
-                              <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${sub ? "bg-green-500 text-white" : allViewed ? "bg-amber-100 text-amber-600" : "bg-gray-200 text-gray-400"}`}>
-                                {sub ? <i className="fas fa-check text-xs" /> : allViewed ? <i className="fas fa-play text-xs" /> : <i className="fas fa-lock text-xs" />}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className={`text-sm font-medium ${sub ? "text-green-700" : allViewed ? "text-gray-800" : "text-gray-400"}`}>{r.assessment!.title || `${r.title} Assessment`}</p>
-                                <p className={`text-[11px] ${sub ? "text-green-600" : "text-gray-400"}`}>
-                                  {sub ? `${sub.score}/${sub.totalPoints} (${Math.round((sub.score / sub.totalPoints) * 100)}%)` : `${r.assessment!.questions.length} question${r.assessment!.questions.length !== 1 ? "s" : ""}`}
+                        {isExpanded && (
+                          <div className="border-t border-gray-100">
+                            {/* Final Assessment */}
+                            {hasAssessment && (
+                              <div className={`px-4 py-3 ${allViewed ? "bg-amber-50/50" : "bg-gray-50"}`}>
+                                <p className={`text-xs font-semibold mb-2 ${allViewed ? "text-amber-700" : "text-gray-400"}`}>
+                                  <i className="fas fa-clipboard-check mr-1" />
+                                  {allViewed ? "Final Assessment" : "Complete all modules to unlock the final assessment"}
                                 </p>
+                                <div className={`flex items-center gap-3 p-3 rounded-lg border transition ${sub ? "bg-green-50 border-green-200" : allViewed ? "bg-white border-gray-200 hover:border-amber-300 hover:shadow-sm cursor-pointer" : "bg-gray-100 border-gray-200 opacity-60"}`}
+                                  onClick={(e) => { e.stopPropagation(); if (allViewed && !sub) setActiveAssessment({ resourceId: r.id }) }}>
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${sub ? "bg-green-500 text-white" : allViewed ? "bg-amber-100 text-amber-600" : "bg-gray-200 text-gray-400"}`}>
+                                    {sub ? <i className="fas fa-check text-xs" /> : allViewed ? <i className="fas fa-play text-xs" /> : <i className="fas fa-lock text-xs" />}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className={`text-sm font-medium ${sub ? "text-green-700" : allViewed ? "text-gray-800" : "text-gray-400"}`}>{r.assessment!.title || `${r.title} Assessment`}</p>
+                                    <p className={`text-[11px] ${sub ? "text-green-600" : "text-gray-400"}`}>
+                                      {sub ? `${sub.score}/${sub.totalPoints} (${Math.round((sub.score / sub.totalPoints) * 100)}%)` : `${r.assessment!.questions.length} question${r.assessment!.questions.length !== 1 ? "s" : ""}`}
+                                    </p>
+                                  </div>
+                                  {sub ? (
+                                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">
+                                      <i className="fas fa-check-circle mr-0.5" />Submitted
+                                    </span>
+                                  ) : allViewed ? (
+                                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 shrink-0">
+                                      Start
+                                    </span>
+                                  ) : (
+                                    <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
+                                  )}
+                                </div>
                               </div>
-                              {sub ? (
-                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">
-                                  <i className="fas fa-check-circle mr-0.5" />Submitted
-                                </span>
-                              ) : allViewed ? (
-                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 shrink-0">
-                                  Start
-                                </span>
-                              ) : (
-                                <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
-                              )}
-                            </div>
-                          </div>
-                        )}
+                            )}
 
-                        {/* Tasks */}
-                        {hasTasks && (
-                          <div className={`border-t px-5 py-4 ${allViewed ? "bg-blue-50/50 border-blue-100" : "bg-gray-50 border-gray-100"}`}>
-                            <p className={`text-xs font-semibold mb-3 ${allViewed ? "text-blue-700" : "text-gray-400"}`}>
-                              <i className="fas fa-list-check mr-1" />
-                              {allViewed ? "Available Tasks" : "Complete all modules to unlock tasks"}
-                            </p>
-                            <div className="space-y-2">
-                              {modulesWithTasks.map(({ mod, idx }) => {
-                                const isViewed = viewed.includes(idx)
-                                const isUnlocked = allViewed && isViewed
-                                return (mod.tasks || []).map((task) => {
-                                  const taskTypeConfig: Record<string, { icon: string; color: string; label: string }> = {
-                                    assignment: { icon: "fa-book-open", color: "#1A73E8", label: "Assignment" },
-                                    quiz: { icon: "fa-clipboard-list", color: "#0F9D58", label: "Quiz" },
-                                    discussion: { icon: "fa-comments", color: "#E67C13", label: "Discussion" },
-                                    material: { icon: "fa-newspaper", color: "#673AB7", label: "Material" },
-                                  }
-                                  const tcfg = taskTypeConfig[task.type] || taskTypeConfig.assignment
-                                  return (
-                                    <div key={task.id} className={`flex items-center gap-3 p-3 rounded-lg border transition ${isUnlocked ? "bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm" : "bg-gray-100 border-gray-200 opacity-60"}`}>
-                                      <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: tcfg.color + "18" }}>
-                                        <i className={`fas ${tcfg.icon} text-xs`} style={{ color: tcfg.color }} />
-                                      </div>
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-medium text-gray-800">{task.title || `Module ${idx + 1} ${tcfg.label}`}</p>
-                                        <p className="text-[11px] text-gray-400">
-                                          {tcfg.label}
-                                          {task.dueDate && ` \u00B7 Due ${new Date(task.dueDate).toLocaleDateString()}`}
-                                          {task.points !== undefined && ` \u00B7 ${task.points} pts`}
-                                        </p>
-                                      </div>
-                                      {isUnlocked ? (
-                                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: tcfg.color + "18", color: tcfg.color }}>
-                                          {task.type === "material" ? "View" : "Open"}
-                                        </span>
-                                      ) : (
-                                        <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
-                                      )}
-                                    </div>
-                                  )
-                                })
-                              })}
-                            </div>
-                          </div>
-                        )}
+                            {/* Module Quizzes */}
+                            {hasTasks && modulesWithTasks.some(({ mod }) => (mod.tasks || []).some(t => t.type === "quiz")) && (
+                              <div className={`px-4 py-3 ${allViewed ? "bg-green-50/50" : "bg-gray-50"}`}>
+                                <p className={`text-xs font-semibold mb-1 ${allViewed ? "text-green-700" : "text-gray-400"}`}>
+                                  <i className="fas fa-clipboard-check mr-1" />
+                                  Module Quizzes
+                                </p>
+                                <p className={`text-[11px] mb-2 ${allViewed ? "text-green-600" : "text-gray-400"}`}>
+                                  These quizzes can be accessed if you finished a module.
+                                </p>
+                                <div className="space-y-2">
+                                  {modulesWithTasks.map(({ mod, idx }) => {
+                                    const quizTasks = (mod.tasks || []).filter(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0)
+                                    if (quizTasks.length === 0) return null
+                                    const isViewed = viewed.includes(idx)
+                                    const quizKey = `${r.id}_${idx}`
+                                    const quizSub = quizSubmissions[quizKey]
+                                    const isPassed = !!quizSub?.passed
+                                    const isFailed = !!quizSub && !quizSub.passed
+                                    return quizTasks.map((task) => {
+                                      const cardClass = isPassed
+                                        ? "bg-green-50 border-green-200"
+                                        : isFailed
+                                          ? "bg-amber-50 border-amber-200 cursor-pointer hover:border-amber-300"
+                                          : isViewed
+                                            ? "bg-white border-gray-200 hover:border-green-300 cursor-pointer"
+                                            : "bg-gray-100 border-gray-200 opacity-60"
+                                      const iconClass = isPassed
+                                        ? "bg-green-500 text-white"
+                                        : isFailed
+                                          ? "bg-amber-100"
+                                          : isViewed
+                                            ? "bg-green-100"
+                                            : "bg-gray-200"
+                                      const icon = isPassed
+                                        ? <i className="fas fa-check text-xs" />
+                                        : isFailed
+                                          ? <i className="fas fa-redo text-xs" style={{ color: "#E67C13" }} />
+                                          : isViewed
+                                            ? <i className="fas fa-clipboard-list text-xs" style={{ color: "#0F9D58" }} />
+                                            : <i className="fas fa-lock text-gray-400 text-xs" />
+                                      const handleClick = (e: React.MouseEvent) => {
+                                        e.stopPropagation()
+                                        if (isPassed) return
+                                        if (isFailed || isViewed) {
+                                          setViewContent({ resource: r, moduleIdx: idx })
+                                        }
+                                      }
+                                      return (
+                                        <div key={task.id} className={`flex items-center gap-3 p-3 rounded-lg border transition ${cardClass}`} onClick={handleClick}>
+                                          <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${iconClass}`}>
+                                            {icon}
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <p className={`text-sm font-medium ${isPassed ? "text-green-700" : isFailed ? "text-amber-700" : "text-gray-800"}`}>{task.title || `Module ${idx + 1} Quiz`}</p>
+                                            <p className={`text-[11px] ${isPassed ? "text-green-600" : isFailed ? "text-amber-600" : "text-gray-400"}`}>
+                                              {isPassed
+                                                ? `${quizSub.score}/${quizSub.total} (${Math.round((quizSub.score / quizSub.total) * 100)}%)`
+                                                : isFailed
+                                                  ? `${quizSub.score}/${quizSub.total} (${Math.round((quizSub.score / quizSub.total) * 100)}%) \u00B7 Review the module to try again`
+                                                  : `${task.assessment!.questions.length} question${task.assessment!.questions.length !== 1 ? "s" : ""}`}
+                                            </p>
+                                          </div>
+                                          {isPassed ? (
+                                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">
+                                              <i className="fas fa-check-circle mr-0.5" />Done
+                                            </span>
+                                          ) : isFailed ? (
+                                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 shrink-0">
+                                              <i className="fas fa-book-reader mr-0.5" />Remedial
+                                            </span>
+                                          ) : isViewed ? (
+                                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">
+                                              Available
+                                            </span>
+                                          ) : (
+                                            <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
+                                          )}
+                                        </div>
+                                      )
+                                    })
+                                  })}
+                                </div>
+                              </div>
+                            )}
 
-                        {!hasTasks && !hasAssessment && (
-                          <div className="border-t border-gray-100 bg-gray-50 px-5 py-3">
-                            <p className="text-xs text-gray-400"><i className="fas fa-info-circle mr-1" />No tasks or assessments added to this resource yet</p>
+                            {/* Other Tasks */}
+                            {hasTasks && modulesWithTasks.some(({ mod }) => (mod.tasks || []).some(t => t.type !== "quiz")) && (
+                              <div className={`px-4 py-3 ${allViewed ? "bg-blue-50/50" : "bg-gray-50"}`}>
+                                <p className={`text-xs font-semibold mb-2 ${allViewed ? "text-blue-700" : "text-gray-400"}`}>
+                                  <i className="fas fa-list-check mr-1" />
+                                  {allViewed ? "Available Tasks" : "Complete all modules to unlock tasks"}
+                                </p>
+                                <div className="space-y-2">
+                                  {modulesWithTasks.map(({ mod, idx }) => {
+                                    const nonQuizTasks = (mod.tasks || []).filter(t => t.type !== "quiz")
+                                    if (nonQuizTasks.length === 0) return null
+                                    const isViewed = viewed.includes(idx)
+                                    const isUnlocked = allViewed && isViewed
+                                    return nonQuizTasks.map((task) => {
+                                      const taskTypeConfig: Record<string, { icon: string; color: string; label: string }> = {
+                                        assignment: { icon: "fa-book-open", color: "#1A73E8", label: "Assignment" },
+                                        discussion: { icon: "fa-comments", color: "#E67C13", label: "Discussion" },
+                                        material: { icon: "fa-newspaper", color: "#673AB7", label: "Material" },
+                                      }
+                                      const tcfg = taskTypeConfig[task.type] || taskTypeConfig.assignment
+                                      return (
+                                        <div key={task.id} className={`flex items-center gap-3 p-3 rounded-lg border transition ${isUnlocked ? "bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm" : "bg-gray-100 border-gray-200 opacity-60"}`}>
+                                          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: tcfg.color + "18" }}>
+                                            <i className={`fas ${tcfg.icon} text-xs`} style={{ color: tcfg.color }} />
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-medium text-gray-800">{task.title || `Module ${idx + 1} ${tcfg.label}`}</p>
+                                            <p className="text-[11px] text-gray-400">
+                                              {tcfg.label}
+                                              {task.dueDate && ` \u00B7 Due ${new Date(task.dueDate).toLocaleDateString()}`}
+                                              {task.points !== undefined && ` \u00B7 ${task.points} pts`}
+                                            </p>
+                                          </div>
+                                          {isUnlocked ? (
+                                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: tcfg.color + "18", color: tcfg.color }}>
+                                              {task.type === "material" ? "View" : "Open"}
+                                            </span>
+                                          ) : (
+                                            <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
+                                          )}
+                                        </div>
+                                      )
+                                    })
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {!hasTasks && !hasAssessment && (
+                              <div className="bg-gray-50 px-4 py-3">
+                                <p className="text-xs text-gray-400"><i className="fas fa-info-circle mr-1" />No tasks or assessments added to this resource yet</p>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

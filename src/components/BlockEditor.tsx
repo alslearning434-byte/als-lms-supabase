@@ -186,7 +186,7 @@ export default function BlockEditor({ module, index, moduleCount, onChange, onRe
 
       {/* Tasks Section */}
       <div>
-        <label className={`text-xs font-semibold uppercase tracking-wider mb-2 block ${isDark ? "text-gray-500" : "text-gray-400"}`}>Tasks & Activities</label>
+        <label className={`text-xs font-semibold uppercase tracking-wider mb-2 block ${isDark ? "text-gray-500" : "text-gray-400"}`}>Module Quiz & Tasks</label>
         <TaskBuilder
           tasks={module.tasks || []}
           onChange={(tasks) => onChange({ ...module, tasks })}

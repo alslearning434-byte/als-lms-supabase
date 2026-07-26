@@ -823,7 +823,7 @@ export default function Teacher() {
                     const totalQuestions = r.assessment?.questions.length || 0
                     const hasAssessment = totalQuestions > 0
                     const subjIcon = getSubjectIcon(r.subject)
-                    const taskCount = mods.reduce((sum, m) => sum + (m.tasks || []).length, 0)
+                    const taskCount = mods.reduce((sum, m) => sum + (m.tasks || []).filter(t => t.type !== "quiz").length, 0)
                     return (
                       <div key={r.id}
                         className={`rounded-2xl border overflow-hidden transition-all hover:shadow-md cursor-pointer ${isDark ? "bg-gray-800 border-gray-700 hover:border-gray-600" : "bg-white border-gray-200 hover:border-gray-300"}`}
@@ -984,7 +984,7 @@ export default function Teacher() {
                   const mods = r.modules || []
                   const blockCounts = { content: 0, image: 0, table: 0 }
                   mods.forEach(m => (m.blocks || []).forEach(b => { if (b.type in blockCounts) blockCounts[b.type as keyof typeof blockCounts]++ }))
-                  const taskCount = mods.reduce((sum, m) => sum + (m.tasks || []).length, 0)
+                  const taskCount = mods.reduce((sum, m) => sum + (m.tasks || []).filter(t => t.type !== "quiz").length, 0)
                   const hasAssessment = (r.assessment?.questions.length || 0) > 0
                   const subjIcon = getSubjectIcon(r.subject)
                   return (
@@ -1484,7 +1484,7 @@ export default function Teacher() {
                       const isSelected = selectedModuleIdx === idx
                       const modName = mod.name.trim() || `Untitled Module ${idx + 1}`
                       const blockCount = mod.blocks.length
-                      const taskCount = (mod.tasks || []).length
+                      const taskCount = (mod.tasks || []).filter(t => t.type !== "quiz").length
 
                       return (
                         <div key={idx}>
@@ -1539,7 +1539,7 @@ export default function Teacher() {
                                 return (
                                   <div key={task.id} className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] ${taskColors[task.type] || "text-gray-400"}`}>
                                     <i className={`fas ${taskIcons[task.type] || "fa-list"} w-3 text-center`} />
-                                    <span className="truncate">{task.title || task.type}</span>
+                                    <span className="truncate">{task.type === "quiz" ? (task.assessment?.title || "Quiz") : (task.title || task.type)}</span>
                                   </div>
                                 )
                               })}
