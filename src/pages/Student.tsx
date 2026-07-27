@@ -1821,13 +1821,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
     }
   }
 
-  const handleConfirmSkip = () => {
-    if (confirmNav) {
-      if (confirmNav.target === "back") onBack()
-      else onNavigate(confirmNav.target)
-    }
-    setConfirmNav(null)
-  }
+
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-50" onClick={(e) => e.stopPropagation()}>
@@ -2066,7 +2060,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
                   <h3 className="text-base font-bold leading-tight">{mod.name || `Module ${data.moduleIdx + 1}`}</h3>
                 </div>
               </div>
-              <p className="text-xs opacity-80 leading-relaxed">{viewedModules.includes(data.moduleIdx) ? "You've already completed this module." : "Mark this module as completed to move on."}</p>
+              <p className="text-xs opacity-80 leading-relaxed">You need to complete this module before moving on.</p>
             </div>
 
             {/* Progress context */}
@@ -2086,10 +2080,6 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
                 <button onClick={handleConfirmMarkRead}
                   className="w-full py-3 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center justify-center gap-2 shadow-sm shadow-navy-500/20">
                   <i className="fas fa-check-circle text-xs" /> {viewedModules.includes(data.moduleIdx) ? "Continue" : "Complete & Continue"}
-                </button>
-                <button onClick={handleConfirmSkip}
-                  className="w-full py-3 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition flex items-center justify-center gap-2">
-                  <i className="fas fa-forward text-xs text-gray-400" /> Skip & Continue
                 </button>
                 <button onClick={() => setConfirmNav(null)}
                   className="w-full py-2.5 text-gray-400 text-xs font-medium rounded-xl hover:text-gray-600 transition">
