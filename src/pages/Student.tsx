@@ -10,7 +10,7 @@ import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
 import { db } from "../firebase"
 import { collection, getDocs, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore"
-import type { NavItem, Resource } from "../types"
+import type { NavItem, Resource, ModuleTask } from "../types"
 import { getSubjectIcon } from "../utils/subjectIcons"
 import ImageCarousel from "../components/ImageCarousel"
 
@@ -51,6 +51,7 @@ export default function Student() {
   const [quizSubmissions, setQuizSubmissions] = useState<Record<string, { score: number; total: number; passed: boolean }>>({})
   const [expandedCard, setExpandedCard] = useState<string | null>(null)
   const [congratsTarget, setCongratsTarget] = useState<{ resourceId: string; moduleIdx: number } | null>(null)
+  const [activeModuleTask, setActiveModuleTask] = useState<{ resource: Resource; moduleIdx: number; task: ModuleTask } | null>(null)
 
   const t = (text: string): string => {
     if (language !== "tl") return text
@@ -715,7 +716,9 @@ export default function Student() {
                                 const tcfg = taskTypeConfig[task.type] || taskTypeConfig.assignment
                                 const quizSub = task.type === "quiz" ? quizSubmissions[`${r.id}_${modIdx}`] : undefined
                                 return (
-                                  <div key={task.id} className={`flex items-center gap-3 p-3 rounded-lg border transition ${isViewed ? "bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm" : "bg-gray-100/50 border-gray-200/50 opacity-50"}`}>
+                                  <div key={task.id}
+                                    onClick={() => isViewed ? setActiveModuleTask({ resource: r, moduleIdx: modIdx, task }) : undefined}
+                                    className={`flex items-center gap-3 p-3 rounded-lg border transition ${isViewed ? "bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm cursor-pointer" : "bg-gray-100/50 border-gray-200/50 opacity-50 cursor-not-allowed"}`}>
                                     <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: tcfg.color + "18" }}>
                                       <i className={`fas ${tcfg.icon} text-xs`} style={{ color: tcfg.color }} />
                                     </div>
@@ -1426,6 +1429,100 @@ export default function Student() {
             studentName={profile?.displayName || "Student"}
             onClose={() => setActiveAssessment(null)}
           />
+        )
+      })()}
+
+      {activeModuleTask && (() => {
+        const { resource: r, moduleIdx, task } = activeModuleTask
+        const taskTypeConfig: Record<string, { icon: string; color: string; label: string }> = {
+          assignment: { icon: "fa-book-open", color: "#1A73E8", label: "Assignment" },
+          quiz: { icon: "fa-clipboard-list", color: "#0F9D58", label: "Quiz" },
+          discussion: { icon: "fa-comments", color: "#E67C13", label: "Discussion" },
+          material: { icon: "fa-newspaper", color: "#673AB7", label: "Material" },
+        }
+        const cfg = taskTypeConfig[task.type] || taskTypeConfig.assignment
+
+        if (task.type === "quiz" && task.assessment) {
+          return (
+            <AssessmentTaker
+              resourceId={r.id}
+              assessmentId={`${r.id}_${moduleIdx}_${task.id}`}
+              assessment={task.assessment}
+              studentId={user?.uid || ""}
+              studentName={profile?.displayName || "Student"}
+              onClose={() => setActiveModuleTask(null)}
+              context="quiz"
+            />
+          )
+        }
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setActiveModuleTask(null)}>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: cfg.color + "18" }}>
+                    <i className={`fas ${cfg.icon} text-sm`} style={{ color: cfg.color }} />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-medium" style={{ color: cfg.color }}>{cfg.label}</p>
+                    <h3 className="text-sm font-bold text-gray-800">{task.title || cfg.label}</h3>
+                  </div>
+                </div>
+                <button onClick={() => setActiveModuleTask(null)} className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition">
+                  <i className="fas fa-times text-gray-400 text-xs" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                {task.description && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Description</p>
+                    <div className="tiptap-preview prose prose-sm max-w-none text-sm text-gray-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: task.description }} />
+                  </div>
+                )}
+                {(task.dueDate || task.points !== undefined) && (
+                  <div className="flex items-center gap-4 text-xs text-gray-500">
+                    {task.dueDate && <span><i className="far fa-calendar mr-1" />Due {new Date(task.dueDate).toLocaleDateString()}</span>}
+                    {task.points !== undefined && <span><i className="far fa-star mr-1" />{task.points} points</span>}
+                  </div>
+                )}
+                {task.attachments && task.attachments.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Attachments</p>
+                    <div className="space-y-2">
+                      {task.attachments.map((att, i) => (
+                        <div key={i} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                          <i className="fas fa-paperclip text-gray-400 text-xs" />
+                          <span className="text-sm text-gray-600 truncate flex-1">{att.name || `Attachment ${i + 1}`}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {task.rubric && task.rubric.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Rubric</p>
+                    <div className="space-y-2">
+                      {task.rubric.map((r, i) => (
+                        <div key={i} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-700">{r.criterion}</p>
+                            {r.description && <p className="text-xs text-gray-400 mt-0.5">{r.description}</p>}
+                          </div>
+                          <span className="text-xs font-semibold text-gray-500 shrink-0">{r.points} pts</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
+                <button onClick={() => setActiveModuleTask(null)} className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition">
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
         )
       })()}
     </div>
