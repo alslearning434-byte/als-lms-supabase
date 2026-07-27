@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react"
-import { useEditor, EditorContent } from "@tiptap/react"
+import { useEditor, EditorContent, NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
 import { Table } from "@tiptap/extension-table"
 import { TableRow } from "@tiptap/extension-table-row"
@@ -10,7 +10,7 @@ import { Placeholder } from "@tiptap/extension-placeholder"
 import { Underline } from "@tiptap/extension-underline"
 import { TextAlign } from "@tiptap/extension-text-align"
 import { Image } from "@tiptap/extension-image"
-import { Extension } from "@tiptap/core"
+import { Extension, Node } from "@tiptap/core"
 
 const TabIndent = Extension.create({
   name: "tabIndent",
@@ -22,6 +22,107 @@ const TabIndent = Extension.create({
         return true
       },
     }
+  },
+})
+
+function ImageNodeView({ node, selected, editor, getPos, deleteNode }: {
+  node: any
+  updateAttributes: (attrs: Record<string, any>) => void
+  selected: boolean
+  editor: any
+  getPos: () => number
+  deleteNode: () => void
+}) {
+  const imgRef = useRef<HTMLImageElement>(null)
+  const addFileRef = useRef<HTMLInputElement>(null)
+  const [hovered, setHovered] = useState(false)
+
+  const selectNode = useCallback(() => {
+    if (!editor || !getPos) return
+    const pos = getPos()
+    editor.chain().focus().setNodeSelection(pos).run()
+  }, [editor, getPos])
+
+  const handleAddImage = useCallback((file: File) => {
+    if (!editor || !getPos) return
+    const pos = getPos() + node.nodeSize
+    const reader = new FileReader()
+    reader.onload = () => {
+      const imgHtml = `<img src="${reader.result}" alt="${file.name}">`
+      editor.chain().focus().insertContentAt(pos, imgHtml).run()
+    }
+    reader.readAsDataURL(file)
+  }, [editor, getPos, node.nodeSize])
+
+  return (
+    <NodeViewWrapper
+      className="image-resize-wrapper"
+      onClick={() => { selectNode() }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        selectNode()
+        window.dispatchEvent(new CustomEvent("tiptap-image-contextmenu", {
+          detail: {
+            x: e.clientX,
+            y: e.clientY,
+            src: node.attrs.src,
+            deleteNode,
+          },
+        }))
+      }}
+    >
+      <img
+        ref={imgRef}
+        src={node.attrs.src}
+        alt={node.attrs.alt || ""}
+        style={{ cursor: "pointer", display: "block", borderRadius: "0.5rem" }}
+        className={selected ? "ProseMirror-selectednode" : ""}
+      />
+      {hovered && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: -18,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: 28,
+            height: 28,
+            borderRadius: "50%",
+            background: "#3b82f6",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+            zIndex: 12,
+          }}
+          onClick={(e) => { e.stopPropagation(); addFileRef.current?.click() }}
+          title="Add image below"
+        >
+          <i className="fas fa-plus" style={{ color: "white", fontSize: 12 }} />
+        </div>
+      )}
+      <input
+        ref={addFileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) handleAddImage(file)
+          e.target.value = ""
+        }}
+      />
+    </NodeViewWrapper>
+  )
+}
+
+const ResizableImage = Image.extend({
+  addNodeView() {
+    return ReactNodeViewRenderer(ImageNodeView)
   },
 })
 
@@ -78,18 +179,25 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
   const tablePickerRef = useRef<HTMLDivElement>(null)
   const [tableCtx, setTableCtx] = useState<{ x: number; y: number } | null>(null)
   const tableCtxRef = useRef<HTMLDivElement>(null)
+  const [imageCtx, setImageCtx] = useState<{ x: number; y: number; nodePos: number } | null>(null)
+  const imageCtxRef = useRef<HTMLDivElement>(null)
+  const imageDeleteRef = useRef<(() => void) | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editorRef = useRef<ReturnType<typeof useEditor>>(null)
 
-  const handleImageFile = useCallback((file: File) => {
+  const handleImageFiles = useCallback((files: FileList | File[]) => {
     const ed = editorRef.current
-    if (!ed || !file.type.startsWith("image/")) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      ed.chain().focus().setImage({ src: reader.result as string, alt: file.name }).run()
-    }
-    reader.readAsDataURL(file)
+    if (!ed) return
+    const imageFiles = Array.from(files).filter(f => f.type.startsWith("image/"))
+    if (imageFiles.length === 0) return
+    imageFiles.forEach((file) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        ed.chain().focus().setImage({ src: reader.result as string, alt: file.name }).run()
+      }
+      reader.readAsDataURL(file)
+    })
   }, [])
 
   const cleanWordTable = (html: string): string => {
@@ -258,7 +366,7 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
       TableRow,
       TableCell,
       TableHeader,
-      Image.configure({ inline: false, allowBase64: true }),
+      ResizableImage.configure({ inline: false, allowBase64: true }),
       Link.configure({
         openOnClick: false,
         HTMLAttributes: { class: "text-blue-500 underline cursor-pointer" },
@@ -279,30 +387,37 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
         if (html && /<table[\s>]/i.test(html)) {
           event.preventDefault()
           const clean = cleanWordTable(html)
-          if (clean) editorRef.current?.chain().focus().insertContent(clean).run()
+          if (clean) {
+            editorRef.current?.chain().focus().insertContent(clean).run()
+          } else {
+            editorRef.current?.chain().focus().insertContent(html).run()
+          }
           return true
         }
         const items = event.clipboardData?.items
         if (!items) return false
+        const imageFiles: File[] = []
         for (const item of items) {
           if (item.type.startsWith("image/")) {
-            event.preventDefault()
             const file = item.getAsFile()
-            if (file) handleImageFile(file)
-            return true
+            if (file) imageFiles.push(file)
           }
+        }
+        if (imageFiles.length > 0) {
+          event.preventDefault()
+          handleImageFiles(imageFiles)
+          return true
         }
         return false
       },
       handleDrop: (view, event) => {
         const files = event.dataTransfer?.files
-        if (!files) return false
-        for (const file of files) {
-          if (file.type.startsWith("image/")) {
-            event.preventDefault()
-            handleImageFile(file)
-            return true
-          }
+        if (!files || files.length === 0) return false
+        const imageFiles = Array.from(files).filter(f => f.type.startsWith("image/"))
+        if (imageFiles.length > 0) {
+          event.preventDefault()
+          handleImageFiles(imageFiles)
+          return true
         }
         return false
       },
@@ -336,6 +451,37 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
     document.addEventListener("keydown", handleKey)
     return () => { document.removeEventListener("mousedown", handleClick); document.removeEventListener("keydown", handleKey) }
   }, [tableCtx])
+
+  useEffect(() => {
+    if (!imageCtx) return
+    const handleClick = (e: MouseEvent) => {
+      if (imageCtxRef.current && !imageCtxRef.current.contains(e.target as Node)) setImageCtx(null)
+    }
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") setImageCtx(null) }
+    document.addEventListener("mousedown", handleClick)
+    document.addEventListener("keydown", handleKey)
+    return () => { document.removeEventListener("mousedown", handleClick); document.removeEventListener("keydown", handleKey) }
+  }, [imageCtx])
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (!detail || !editor) return
+      imageDeleteRef.current = detail.deleteNode || null
+      let nodePos = -1
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === "image" && node.attrs.src === detail.src) {
+          nodePos = pos
+          return false
+        }
+      })
+      if (nodePos >= 0) {
+        setImageCtx({ x: detail.x, y: detail.y, nodePos })
+      }
+    }
+    window.addEventListener("tiptap-image-contextmenu", handler)
+    return () => window.removeEventListener("tiptap-image-contextmenu", handler)
+  }, [editor])
 
   const insertTable = useCallback(
     (rows: number, cols: number) => {
@@ -511,10 +657,11 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
           ref={fileInputRef}
           type="file"
           accept="image/*"
+          multiple
           className="hidden"
           onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) handleImageFile(file)
+            const files = e.target.files
+            if (files && files.length > 0) handleImageFiles(files)
             e.target.value = ""
           }}
         />
@@ -582,6 +729,34 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
         </div>
       )}
 
+      {/* Image Context Menu */}
+      {imageCtx && editor && (
+        <div className="fixed inset-0 z-[80]" onContextMenu={(e) => { e.preventDefault(); setImageCtx(null) }}>
+          <div
+            ref={imageCtxRef}
+            className={`fixed z-[81] min-w-[180px] rounded-xl border shadow-2xl py-1.5 ${isDark ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200"}`}
+            style={{ left: Math.min(imageCtx.x, window.innerWidth - 200), top: Math.min(imageCtx.y, window.innerHeight - 80) }}
+          >
+            <button
+              onClick={() => {
+                if (imageDeleteRef.current) {
+                  imageDeleteRef.current()
+                } else {
+                  editor.chain().focus().deleteSelection().run()
+                }
+                setImageCtx(null)
+              }}
+              className={`w-full flex items-center gap-3 px-3 py-2 text-xs font-medium transition ${
+                isDark ? "text-red-400 hover:bg-red-900/20" : "text-red-500 hover:bg-red-50"
+              }`}
+            >
+              <i className="fas fa-trash-alt w-4 text-center text-[10px]" />
+              Delete Image
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Tiptap styles */}
       <style>{`
         .tiptap p { margin: 0.25rem 0; }
@@ -596,8 +771,13 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
         .tiptap td, .tiptap th { border: 1px solid #d1d5db; padding: 0.125rem 0.25rem; position: relative; line-height: 1.4; }
         .tiptap td p, .tiptap th p { margin: 0; }
         .tiptap th { background: #f3f4f6; font-weight: 600; }
-        .tiptap img { max-width: 100%; height: auto; border-radius: 0.5rem; margin: 0.5rem 0; cursor: pointer; }
+        .tiptap img { max-width: 100%; height: auto; border-radius: 0.5rem; margin: 0.5rem 0; cursor: pointer; display: block; }
         .tiptap img.ProseMirror-selectednode { outline: 2px solid #3b82f6; outline-offset: 2px; }
+        .tiptap .image-resize-wrapper { position: relative; display: inline-block; line-height: 0; }
+        .tiptap .image-resize-wrapper:hover { outline: 2px dashed rgba(59,130,246,0.4); outline-offset: 4px; border-radius: 4px; }
+        .tiptap .image-resize-wrapper.ProseMirror-selectednode { outline: none; }
+        .tiptap .wrap-inline { margin: 0.5rem 0; }
+        .tiptap::after { content: ""; display: table; clear: both; }
         .tiptap .selectedCell::after { content: ""; position: absolute; inset: 0; background: rgba(30, 58, 95, 0.1); pointer-events: none; }
         .tiptap .column-resize-handle { position: absolute; right: -2px; top: 0; bottom: 0; width: 4px; background: #3b82f6; cursor: col-resize; }
         .tiptap p.is-editor-empty:first-child::before {

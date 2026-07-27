@@ -124,7 +124,78 @@ export default function TaskBuilder({ tasks, onChange, isDark, moduleData }: Pro
           <div className={`px-4 pb-4 space-y-4 border-t ${isDark ? "border-gray-700" : "border-gray-100"}`}>
             {task.type !== "quiz" && (
               <>
-                <div className="pt-4">
+                <div className="pt-4 flex items-center justify-between">
+                  <label className={`text-xs font-semibold uppercase tracking-wider ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                    <i className="fas fa-wand-magic-sparkles mr-1 text-purple-500" />AI Assistant
+                  </label>
+                  <button
+                    onClick={async () => {
+                      if (!moduleData) return
+                      const endpoints: Record<string, string> = {
+                        assignment: "http://localhost:3001/api/generate-assignment",
+                        discussion: "http://localhost:3001/api/generate-discussion",
+                        material: "http://localhost:3001/api/generate-material",
+                      }
+                      const url = endpoints[task.type]
+                      if (!url) return
+                      setAiGenerating(task.id)
+                      setAiError(null)
+                      try {
+                        const res = await fetch(url, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            moduleTitle: moduleData.name || "Untitled Module",
+                            moduleDescription: moduleData.description || "",
+                            subject: moduleData.subject || "",
+                            blocks: moduleData.blocks.map(b => ({ topic: b.topic || "", description: b.description || "" })),
+                          }),
+                        })
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => ({ error: "Generation failed" }))
+                          throw new Error(err.error || "Generation failed")
+                        }
+                        const data = await res.json()
+                        const updates: Partial<typeof task> = {}
+                        if (data.title) updates.title = data.title
+                        if (data.description) updates.description = data.description
+                        if (data.rubric && Array.isArray(data.rubric)) updates.rubric = data.rubric
+                        updateTask(task.id, updates)
+                      } catch (err) {
+                        setAiError(err instanceof Error ? err.message : "Failed to generate content")
+                      } finally {
+                        setAiGenerating(null)
+                      }
+                    }}
+                    disabled={aiGenerating !== null || !moduleData || moduleData.blocks.length === 0}
+                    className={`text-[11px] font-medium px-3 py-1.5 rounded-lg border transition flex items-center gap-1.5 ${
+                      aiGenerating !== null ? "opacity-50 cursor-not-allowed " : ""
+                    }${isDark ? "border-purple-700 text-purple-400 hover:bg-purple-900/20" : "border-purple-200 text-purple-600 hover:bg-purple-50"}`}
+                  >
+                    {aiGenerating === task.id ? (
+                      <><i className="fas fa-spinner fa-spin text-[10px]" /> Generating...</>
+                    ) : (
+                      <><i className="fas fa-wand-magic-sparkles text-[10px]" /> Generate with AI</>
+                    )}
+                  </button>
+                </div>
+
+                {aiError && aiGenerating === null && (
+                  <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs flex items-center gap-2">
+                    <i className="fas fa-exclamation-circle text-[10px] shrink-0" />
+                    <span className="flex-1">{aiError}</span>
+                    <button onClick={() => setAiError(null)} className="text-red-400 hover:text-red-600"><i className="fas fa-times text-[10px]" /></button>
+                  </div>
+                )}
+
+                {aiGenerating === task.id && (
+                  <div className="px-3 py-2 rounded-lg bg-purple-50 border border-purple-200 text-purple-600 text-xs flex items-center gap-2">
+                    <i className="fas fa-spinner fa-spin text-[10px]" />
+                    <span>Generating {task.type} content with AI...</span>
+                  </div>
+                )}
+
+                <div>
                   <input type="text" value={task.title} onChange={(e) => updateTask(task.id, { title: e.target.value })}
                     placeholder={`${cfg.label} title`}
                     className={`w-full px-3 py-2.5 rounded-xl border text-sm font-medium focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 transition ${isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "bg-gray-50 border-gray-200 text-gray-800 placeholder-gray-400"}`} />
@@ -146,7 +217,7 @@ export default function TaskBuilder({ tasks, onChange, isDark, moduleData }: Pro
                         className={`w-full px-3 py-2 rounded-xl border text-sm focus:outline-none transition ${isDark ? "bg-gray-800 border-gray-700 text-white" : "bg-gray-50 border-gray-200"}`} />
                     </div>
                   )}
-            {task.type !== "material" && task.type !== "quiz" && (
+                  {task.type !== "material" && task.type !== "quiz" && (
                     <div className="flex-1">
                       <label className={`text-xs font-semibold uppercase tracking-wider mb-1.5 block ${isDark ? "text-gray-500" : "text-gray-400"}`}>Due Date</label>
                       <CustomDatePicker value={task.dueDate || ""} onChange={(val) => updateTask(task.id, { dueDate: val })} isDark={!!isDark} />
@@ -286,7 +357,7 @@ export default function TaskBuilder({ tasks, onChange, isDark, moduleData }: Pro
             </div>
             <div>
               <p className={`text-xs font-semibold ${isDark ? "text-amber-300" : "text-amber-700"}`}>Module Quiz</p>
-              <p className={`text-[10px] ${isDark ? "text-amber-400/70" : "text-amber-500"}`}>Required for students to move to the next module</p>
+              <p className={`text-[10px] ${isDark ? "text-amber-400/70" : "text-amber-500"}`}>Unlocks when students complete this module</p>
             </div>
           </div>
           {!hasQuiz && (
@@ -305,7 +376,7 @@ export default function TaskBuilder({ tasks, onChange, isDark, moduleData }: Pro
         ) : (
           <div className={`px-4 py-4 text-center border-t ${isDark ? "border-amber-800/30" : "border-amber-200/60"}`}>
             <i className="fas fa-clipboard-list text-2xl text-amber-300 mb-2" />
-            <p className={`text-xs ${isDark ? "text-amber-400/60" : "text-amber-400"}`}>No quiz added yet. Students must pass this quiz to complete the module.</p>
+            <p className={`text-xs ${isDark ? "text-amber-400/60" : "text-amber-400"}`}>No quiz added yet. Students can take this quiz after completing the module.</p>
           </div>
         )}
       </div>

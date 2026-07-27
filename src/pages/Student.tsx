@@ -9,14 +9,15 @@ import AssessmentTaker from "../components/AssessmentTaker"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
 import { db } from "../firebase"
-import { collection, getDocs, doc, getDoc, setDoc, addDoc, serverTimestamp } from "firebase/firestore"
+import { collection, getDocs, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore"
 import type { NavItem, Resource } from "../types"
 import { getSubjectIcon } from "../utils/subjectIcons"
+import ImageCarousel from "../components/ImageCarousel"
 
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "th-large" },
   { id: "modules", label: "My Modules", icon: "book-open" },
-  { id: "finish-modules", label: "Finish Modules", icon: "check-double" },
+  { id: "finish-modules", label: "Module Progress", icon: "check-double" },
   { id: "assignments", label: "Assignments", icon: "tasks" },
   { id: "progress", label: "Progress", icon: "chart-line" },
   { id: "calendar", label: "Calendar", icon: "calendar-alt" },
@@ -49,6 +50,7 @@ export default function Student() {
   const [assessmentSubmissions, setAssessmentSubmissions] = useState<Record<string, { score: number; totalPoints: number }>>({})
   const [quizSubmissions, setQuizSubmissions] = useState<Record<string, { score: number; total: number; passed: boolean }>>({})
   const [expandedCard, setExpandedCard] = useState<string | null>(null)
+  const [congratsTarget, setCongratsTarget] = useState<{ resourceId: string; moduleIdx: number } | null>(null)
 
   const t = (text: string): string => {
     if (language !== "tl") return text
@@ -70,7 +72,7 @@ export default function Student() {
       "My Modules": "Aking Modyul",
       "Finish": "Tapos",
       "Start": "Simulan",
-      "Finish Modules": "Tapos na Modyul",
+      "Module Progress": "Progreso ng Modyul",
       "Unlock Activities, Tasks, Quizzes, and Assignments by completing each module.": "I-unlock ang mga Aktibidad, Gawain, Pagsusulit, at Takdang-aralin sa pamamagitan ng pagkumpleto ng bawat modyul.",
       "Unlocked": "Naka-unlock",
       "Complete this module to unlock": "Kumpletuhin ang modyul na ito para ma-unlock",
@@ -303,6 +305,18 @@ export default function Student() {
     })()
   }, [user])
 
+  useEffect(() => {
+    if (congratsTarget && activePage === "finish-modules") {
+      setExpandedCard(congratsTarget.resourceId)
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`module-tasks-${congratsTarget.resourceId}-${congratsTarget.moduleIdx}`)
+        el?.scrollIntoView({ behavior: "smooth", block: "center" })
+        setCongratsTarget(null)
+      }, 150)
+      return () => clearTimeout(timer)
+    }
+  }, [congratsTarget, activePage])
+
   const markModuleViewed = async (resourceId: string, moduleIdx: number) => {
     if (!user?.uid) return
     const key = `${user.uid}_${resourceId}`
@@ -451,8 +465,9 @@ export default function Student() {
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
+                          </div>
+                        )}
+
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0">
@@ -554,7 +569,7 @@ export default function Student() {
               <h2 className="text-2xl font-bold text-gray-800">{t("My Modules")}</h2>
               <p className="text-gray-500 mt-1 mb-6">{t("Access your learning materials and lessons")}</p>
               <ModuleModal resource={modalResource} viewedModules={modalResource ? (progressMap[modalResource.id] || []) : []} onClose={() => setModalResource(null)} onViewContent={(r, idx) => { setModalResource(null); setViewContent({ resource: r, moduleIdx: idx }) }} onToggleUnread={(resourceId, moduleIdx) => markModuleUnread(resourceId, moduleIdx)} t={t} />
-              <ModuleViewer data={viewContent} viewedModules={viewContent ? (progressMap[viewContent.resource.id] || []) : []} onBack={() => { setViewContent(null) }} onNavigate={(idx) => { setViewContent(prev => prev ? { ...prev, moduleIdx: idx } : null) }} onMarkViewed={(resourceId, moduleIdx) => markModuleViewed(resourceId, moduleIdx)} user={user} t={t} />
+              <ModuleViewer data={viewContent} viewedModules={viewContent ? (progressMap[viewContent.resource.id] || []) : []} onBack={() => { setViewContent(null) }} onNavigate={(idx) => { setViewContent(prev => prev ? { ...prev, moduleIdx: idx } : null) }} onMarkViewed={(resourceId, moduleIdx) => markModuleViewed(resourceId, moduleIdx)} onGoToProgress={(resourceId, moduleIdx) => { setViewContent(null); setCongratsTarget({ resourceId, moduleIdx }); setActivePage("finish-modules") }} user={user} t={t} />
               {resources.length === 0 ? (
                 <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 bg-gray-100">
@@ -595,8 +610,8 @@ export default function Student() {
           {/* Finish Modules */}
           {activePage === "finish-modules" && (
             <div>
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">{t("Finish Modules")}</h2>
-              <p className="text-gray-500 text-sm mb-6">{t("Unlock activities, tasks, quizzes, and assignments by completing each module.")}</p>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">{t("Module Progress")}</h2>
+              <p className="text-gray-500 text-sm mb-6">{t("View your progress and unlock tasks, quizzes, and assessments by completing each module.")}</p>
               {resources.length === 0 ? (
                 <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
                   <p className="font-medium text-gray-500">No modules to finish yet</p>
@@ -608,24 +623,24 @@ export default function Student() {
                     const mods = r.modules || []
                     const viewed = progressMap[r.id] || []
                     const allViewed = mods.length > 0 && viewed.length >= mods.length
-                    const modulesWithTasks = mods.map((m, i) => ({ mod: m, idx: i })).filter(({ mod }) => (mod.tasks || []).length > 0)
-                    const hasTasks = modulesWithTasks.length > 0
+                    const isExpandable = viewed.length > 0 && (mods.some(m => (m.tasks || []).length > 0) || (r.assessment && r.assessment.questions.length > 0))
                     const hasAssessment = !!(r.assessment && r.assessment.questions.length > 0)
                     const sub = assessmentSubmissions[r.id]
                     const isExpanded = expandedCard === r.id
-                    const hasContent = hasTasks || hasAssessment
-                    const quizCount = mods.reduce((acc, m) => acc + (m.tasks || []).filter(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0).length, 0)
-                    const taskCount = mods.reduce((acc, m) => acc + (m.tasks || []).filter(t => t.type !== "quiz").length, 0)
-                    const doneQuizzes = mods.reduce((acc, m, i) => {
-                      const key = `${r.id}_${i}`
-                      return acc + (quizSubmissions[key]?.passed ? 1 : 0)
-                    }, 0)
+                    const totalTaskCount = mods.reduce((acc, m) => acc + (m.tasks || []).length, 0)
+
+                    const taskTypeConfig: Record<string, { icon: string; color: string; label: string }> = {
+                      assignment: { icon: "fa-book-open", color: "#1A73E8", label: "Assignment" },
+                      quiz: { icon: "fa-clipboard-list", color: "#0F9D58", label: "Quiz" },
+                      discussion: { icon: "fa-comments", color: "#E67C13", label: "Discussion" },
+                      material: { icon: "fa-newspaper", color: "#673AB7", label: "Material" },
+                    }
 
                     return (
-                      <div key={r.id} className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 ${isExpanded ? "sm:col-span-2 lg:col-span-3 shadow-md" : ""} ${allViewed && hasContent ? "border-green-200" : "border-gray-200"}`}>
+                      <div key={r.id} className={`relative bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 ${isExpanded ? "sm:col-span-2 lg:col-span-3 shadow-md ring-2 ring-navy-400 border-navy-300" : ""} ${allViewed && isExpandable ? "border-green-200" : "border-gray-200"}`}>
                         <div
-                          className={`p-4 ${allViewed && hasContent ? "cursor-pointer hover:bg-gray-50/50 transition-colors" : ""}`}
-                          onClick={() => allViewed && hasContent ? setExpandedCard(isExpanded ? null : r.id) : undefined}
+                          className={`p-4 ${isExpandable ? "cursor-pointer hover:bg-gray-50/50 transition-colors" : "cursor-not-allowed"}`}
+                          onClick={() => isExpandable ? setExpandedCard(isExpanded ? null : r.id) : undefined}
                         >
                           <div className="flex items-start gap-3 mb-3">
                             <div className={`w-11 h-11 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0`}>
@@ -639,16 +654,20 @@ export default function Student() {
                               {r.description && <p className="text-[11px] text-gray-400 line-clamp-2 leading-relaxed">{r.description}</p>}
                             </div>
                             <div className="flex flex-col items-end gap-1.5 shrink-0">
-                              {allViewed && hasContent ? (
+                              {allViewed && isExpandable ? (
                                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
                                   <i className="fas fa-unlock mr-0.5" />Unlocked
                                 </span>
-                              ) : !allViewed ? (
+                              ) : viewed.length === 0 ? (
                                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
                                   <i className="fas fa-lock mr-0.5" />Locked
                                 </span>
-                              ) : null}
-                              {allViewed && hasContent && (
+                              ) : (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-navy-50 text-navy-600">
+                                  {viewed.length}/{mods.length}
+                                </span>
+                              )}
+                              {isExpandable && (
                                 <i className={`fas fa-chevron-${isExpanded ? "up" : "down"} text-gray-400 text-xs transition-transform`} />
                               )}
                             </div>
@@ -668,14 +687,9 @@ export default function Student() {
                               <span className="text-[11px] text-gray-500 font-medium">{viewed.length}/{mods.length} modules</span>
                             </div>
                             <div className="flex items-center gap-1.5">
-                              {quizCount > 0 && (
-                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${doneQuizzes === quizCount ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-500"}`}>
-                                  <i className="fas fa-clipboard-list mr-0.5" />{doneQuizzes}/{quizCount} quizzes
-                                </span>
-                              )}
-                              {taskCount > 0 && (
+                              {totalTaskCount > 0 && (
                                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                                  <i className="fas fa-list-check mr-0.5" />{taskCount} tasks
+                                  <i className="fas fa-list-check mr-0.5" />{totalTaskCount} task{totalTaskCount !== 1 ? "s" : ""}
                                 </span>
                               )}
                               {hasAssessment && (
@@ -689,6 +703,70 @@ export default function Student() {
 
                         {isExpanded && (
                           <div className="border-t border-gray-100">
+                            {/* Per-module tasks */}
+                            {mods.map((mod, modIdx) => {
+                              const modTasks = (mod.tasks || [])
+                              if (modTasks.length === 0) return null
+                              const isViewed = viewed.includes(modIdx)
+                              return (
+                                <div key={modIdx} id={`module-tasks-${r.id}-${modIdx}`} className={`border-b border-gray-50 last:border-b-0 ${isViewed ? "bg-navy-50/30" : "bg-gray-50/50"}`}>
+                                  <div className="px-4 py-2.5 flex items-center gap-2">
+                                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${isViewed ? "bg-green-500 text-white" : "bg-gray-200 text-gray-400"}`}>
+                                      {isViewed ? <i className="fas fa-check" /> : modIdx + 1}
+                                    </span>
+                                    <div className="flex-1 min-w-0">
+                                      <p className={`text-xs font-semibold ${isViewed ? "text-navy-700" : "text-gray-400"}`}>{mod.name || `Module ${modIdx + 1}`}</p>
+                                    </div>
+                                    {!isViewed && (
+                                      <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-400">
+                                        <i className="fas fa-lock mr-0.5" />Locked
+                                      </span>
+                                    )}
+                                    {isViewed && (
+                                      <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-green-50 text-green-600">
+                                        <i className="fas fa-check-circle mr-0.5" />Completed
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="px-4 pb-3 space-y-1.5">
+                                    {modTasks.map((task) => {
+                                      const tcfg = taskTypeConfig[task.type] || taskTypeConfig.assignment
+                                      const quizSub = task.type === "quiz" ? quizSubmissions[`${r.id}_${modIdx}`] : undefined
+                                      return (
+                                        <div key={task.id} className={`flex items-center gap-3 p-3 rounded-lg border transition ${isViewed ? "bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm" : "bg-gray-100/50 border-gray-200/50 opacity-50"}`}>
+                                          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: tcfg.color + "18" }}>
+                                            <i className={`fas ${tcfg.icon} text-xs`} style={{ color: tcfg.color }} />
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <p className={`text-sm font-medium ${isViewed ? "text-gray-800" : "text-gray-400"}`}>{task.title || `${tcfg.label}`}</p>
+                                            <p className="text-[11px] text-gray-400">
+                                              {tcfg.label}
+                                              {task.dueDate && ` \u00B7 Due ${new Date(task.dueDate).toLocaleDateString()}`}
+                                              {task.points !== undefined && ` \u00B7 ${task.points} pts`}
+                                              {quizSub && ` \u00B7 ${quizSub.score}/${quizSub.total} (${Math.round((quizSub.score / quizSub.total) * 100)}%)`}
+                                            </p>
+                                          </div>
+                                          {isViewed ? (
+                                            quizSub ? (
+                                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${quizSub.passed ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"}`}>
+                                                {quizSub.passed ? <><i className="fas fa-check-circle mr-0.5" />Passed</> : <><i className="fas fa-times-circle mr-0.5" />Failed</>}
+                                              </span>
+                                            ) : (
+                                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: tcfg.color + "18", color: tcfg.color }}>
+                                                {task.type === "material" ? "View" : "Open"}
+                                              </span>
+                                            )
+                                          ) : (
+                                            <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
+                                          )}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              )
+                            })}
+
                             {/* Final Assessment */}
                             {hasAssessment && (
                               <div className={`px-4 py-3 ${allViewed ? "bg-amber-50/50" : "bg-gray-50"}`}>
@@ -722,145 +800,21 @@ export default function Student() {
                               </div>
                             )}
 
-                            {/* Module Quizzes */}
-                            {hasTasks && modulesWithTasks.some(({ mod }) => (mod.tasks || []).some(t => t.type === "quiz")) && (
-                              <div className={`px-4 py-3 ${allViewed ? "bg-green-50/50" : "bg-gray-50"}`}>
-                                <p className={`text-xs font-semibold mb-1 ${allViewed ? "text-green-700" : "text-gray-400"}`}>
-                                  <i className="fas fa-clipboard-check mr-1" />
-                                  Module Quizzes
-                                </p>
-                                <p className={`text-[11px] mb-2 ${allViewed ? "text-green-600" : "text-gray-400"}`}>
-                                  These quizzes can be accessed if you finished a module.
-                                </p>
-                                <div className="space-y-2">
-                                  {modulesWithTasks.map(({ mod, idx }) => {
-                                    const quizTasks = (mod.tasks || []).filter(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0)
-                                    if (quizTasks.length === 0) return null
-                                    const isViewed = viewed.includes(idx)
-                                    const quizKey = `${r.id}_${idx}`
-                                    const quizSub = quizSubmissions[quizKey]
-                                    const isPassed = !!quizSub?.passed
-                                    const isFailed = !!quizSub && !quizSub.passed
-                                    return quizTasks.map((task) => {
-                                      const cardClass = isPassed
-                                        ? "bg-green-50 border-green-200"
-                                        : isFailed
-                                          ? "bg-amber-50 border-amber-200 cursor-pointer hover:border-amber-300"
-                                          : isViewed
-                                            ? "bg-white border-gray-200 hover:border-green-300 cursor-pointer"
-                                            : "bg-gray-100 border-gray-200 opacity-60"
-                                      const iconClass = isPassed
-                                        ? "bg-green-500 text-white"
-                                        : isFailed
-                                          ? "bg-amber-100"
-                                          : isViewed
-                                            ? "bg-green-100"
-                                            : "bg-gray-200"
-                                      const icon = isPassed
-                                        ? <i className="fas fa-check text-xs" />
-                                        : isFailed
-                                          ? <i className="fas fa-redo text-xs" style={{ color: "#E67C13" }} />
-                                          : isViewed
-                                            ? <i className="fas fa-clipboard-list text-xs" style={{ color: "#0F9D58" }} />
-                                            : <i className="fas fa-lock text-gray-400 text-xs" />
-                                      const handleClick = (e: React.MouseEvent) => {
-                                        e.stopPropagation()
-                                        if (isPassed) return
-                                        if (isFailed || isViewed) {
-                                          setViewContent({ resource: r, moduleIdx: idx })
-                                        }
-                                      }
-                                      return (
-                                        <div key={task.id} className={`flex items-center gap-3 p-3 rounded-lg border transition ${cardClass}`} onClick={handleClick}>
-                                          <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${iconClass}`}>
-                                            {icon}
-                                          </div>
-                                          <div className="flex-1 min-w-0">
-                                            <p className={`text-sm font-medium ${isPassed ? "text-green-700" : isFailed ? "text-amber-700" : "text-gray-800"}`}>{task.title || `Module ${idx + 1} Quiz`}</p>
-                                            <p className={`text-[11px] ${isPassed ? "text-green-600" : isFailed ? "text-amber-600" : "text-gray-400"}`}>
-                                              {isPassed
-                                                ? `${quizSub.score}/${quizSub.total} (${Math.round((quizSub.score / quizSub.total) * 100)}%)`
-                                                : isFailed
-                                                  ? `${quizSub.score}/${quizSub.total} (${Math.round((quizSub.score / quizSub.total) * 100)}%) \u00B7 Review the module to try again`
-                                                  : `${task.assessment!.questions.length} question${task.assessment!.questions.length !== 1 ? "s" : ""}`}
-                                            </p>
-                                          </div>
-                                          {isPassed ? (
-                                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">
-                                              <i className="fas fa-check-circle mr-0.5" />Done
-                                            </span>
-                                          ) : isFailed ? (
-                                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 shrink-0">
-                                              <i className="fas fa-book-reader mr-0.5" />Remedial
-                                            </span>
-                                          ) : isViewed ? (
-                                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">
-                                              Available
-                                            </span>
-                                          ) : (
-                                            <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
-                                          )}
-                                        </div>
-                                      )
-                                    })
-                                  })}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Other Tasks */}
-                            {hasTasks && modulesWithTasks.some(({ mod }) => (mod.tasks || []).some(t => t.type !== "quiz")) && (
-                              <div className={`px-4 py-3 ${allViewed ? "bg-blue-50/50" : "bg-gray-50"}`}>
-                                <p className={`text-xs font-semibold mb-2 ${allViewed ? "text-blue-700" : "text-gray-400"}`}>
-                                  <i className="fas fa-list-check mr-1" />
-                                  {allViewed ? "Available Tasks" : "Complete all modules to unlock tasks"}
-                                </p>
-                                <div className="space-y-2">
-                                  {modulesWithTasks.map(({ mod, idx }) => {
-                                    const nonQuizTasks = (mod.tasks || []).filter(t => t.type !== "quiz")
-                                    if (nonQuizTasks.length === 0) return null
-                                    const isViewed = viewed.includes(idx)
-                                    const isUnlocked = allViewed && isViewed
-                                    return nonQuizTasks.map((task) => {
-                                      const taskTypeConfig: Record<string, { icon: string; color: string; label: string }> = {
-                                        assignment: { icon: "fa-book-open", color: "#1A73E8", label: "Assignment" },
-                                        discussion: { icon: "fa-comments", color: "#E67C13", label: "Discussion" },
-                                        material: { icon: "fa-newspaper", color: "#673AB7", label: "Material" },
-                                      }
-                                      const tcfg = taskTypeConfig[task.type] || taskTypeConfig.assignment
-                                      return (
-                                        <div key={task.id} className={`flex items-center gap-3 p-3 rounded-lg border transition ${isUnlocked ? "bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm" : "bg-gray-100 border-gray-200 opacity-60"}`}>
-                                          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: tcfg.color + "18" }}>
-                                            <i className={`fas ${tcfg.icon} text-xs`} style={{ color: tcfg.color }} />
-                                          </div>
-                                          <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium text-gray-800">{task.title || `Module ${idx + 1} ${tcfg.label}`}</p>
-                                            <p className="text-[11px] text-gray-400">
-                                              {tcfg.label}
-                                              {task.dueDate && ` \u00B7 Due ${new Date(task.dueDate).toLocaleDateString()}`}
-                                              {task.points !== undefined && ` \u00B7 ${task.points} pts`}
-                                            </p>
-                                          </div>
-                                          {isUnlocked ? (
-                                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: tcfg.color + "18", color: tcfg.color }}>
-                                              {task.type === "material" ? "View" : "Open"}
-                                            </span>
-                                          ) : (
-                                            <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
-                                          )}
-                                        </div>
-                                      )
-                                    })
-                                  })}
-                                </div>
-                              </div>
-                            )}
-
-                            {!hasTasks && !hasAssessment && (
+                            {totalTaskCount === 0 && !hasAssessment && (
                               <div className="bg-gray-50 px-4 py-3">
                                 <p className="text-xs text-gray-400"><i className="fas fa-info-circle mr-1" />No tasks or assessments added to this resource yet</p>
                               </div>
                             )}
+                          </div>
+                        )}
+
+                        {viewed.length === 0 && (
+                          <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] flex flex-col items-center justify-center z-10 rounded-xl pointer-events-none">
+                            <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center mb-2 shadow-sm">
+                              <i className="fas fa-lock text-gray-400 text-lg" />
+                            </div>
+                            <p className="text-xs font-semibold text-gray-500">No modules viewed yet</p>
+                            <p className="text-[11px] text-gray-400 mt-0.5">Complete modules to unlock tasks</p>
                           </div>
                         )}
                       </div>
@@ -1579,19 +1533,26 @@ function ModuleModal({ resource, viewedModules, onClose, onViewContent, onToggle
                 const blockCount = m.blocks?.length || 0
                 const hasContent = blockCount > 0
                 const isViewed = viewedModules.includes(i)
+                const isLocked = !isViewed && i > 0 && !viewedModules.includes(i - 1)
                 return (
                   <button
                     key={i}
-                    onClick={() => onViewContent(resource, i)}
-                    className="w-full text-left p-4 rounded-xl border border-gray-100 hover:border-navy-200 hover:bg-navy-50/50 transition-all group"
+                    onClick={() => { if (!isLocked) onViewContent(resource, i) }}
+                    className={`w-full text-left p-4 rounded-xl border transition-all group ${isLocked ? "border-gray-100 bg-gray-50/50 cursor-not-allowed opacity-60" : "border-gray-100 hover:border-navy-200 hover:bg-navy-50/50"}`}
+                    disabled={isLocked}
                   >
                     <div className="flex items-start gap-3.5">
-                      <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 transition ${isViewed ? "bg-green-500 text-white" : "bg-navy-500/10 text-navy-600 group-hover:bg-navy-500 group-hover:text-white"}`}>
-                        {isViewed ? <i className="fas fa-check" /> : i + 1}
+                      <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 transition ${isLocked ? "bg-gray-200 text-gray-400" : isViewed ? "bg-green-500 text-white" : "bg-navy-500/10 text-navy-600 group-hover:bg-navy-500 group-hover:text-white"}`}>
+                        {isLocked ? <i className="fas fa-lock text-xs" /> : isViewed ? <i className="fas fa-check" /> : i + 1}
                       </span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-800 group-hover:text-navy-600 transition truncate">{m.name || `Module ${i + 1}`}</span>
+                          <span className={`text-sm font-semibold truncate transition ${isLocked ? "text-gray-400" : "text-gray-800 group-hover:text-navy-600"}`}>{m.name || `Module ${i + 1}`}</span>
+                          {isLocked && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 shrink-0">
+                              <i className="fas fa-lock mr-0.5" />Locked
+                            </span>
+                          )}
                           {isViewed && (
                             <span
                               onClick={(e) => { e.stopPropagation(); onToggleUnread(resource.id, i) }}
@@ -1654,21 +1615,18 @@ function ModuleModal({ resource, viewedModules, onClose, onViewContent, onToggle
   )
 }
 
-function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, user, t }: {
+function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, onGoToProgress, user, t }: {
   data: { resource: Resource; moduleIdx: number } | null
   viewedModules: number[]
   onBack: () => void
   onNavigate: (moduleIdx: number) => void
   onMarkViewed: (resourceId: string, moduleIdx: number) => void
+  onGoToProgress: (resourceId: string, moduleIdx: number) => void
   user: { uid: string; displayName?: string | null; email?: string | null } | null
   t: (text: string) => string
 }) {
   const [confirmNav, setConfirmNav] = useState<null | { target: number | "back" }>(null)
-  const [quizState, setQuizState] = useState<"active" | "passed" | "failed" | null>(null)
-  const [moduleQuiz, setModuleQuiz] = useState<{ id: string; text: string; type: string; options: string[]; correctAnswer: string }[]>([])
-  const [moduleQuizAnswers, setModuleQuizAnswers] = useState<Record<string, string>>({})
-  const [moduleQuizScore, setModuleQuizScore] = useState<{ score: number; total: number } | null>(null)
-  const quizNavTarget = useRef<number | "back" | null>(null)
+  const [congratsState, setCongratsState] = useState<{ resourceId: string; moduleIdx: number; moduleName: string } | null>(null)
 
   if (!data) return null
 
@@ -1680,69 +1638,12 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, u
   const blockTypeCounts = { content: 0, image: 0, table: 0 }
   ;(mod.blocks || []).forEach(b => { if (b.type in blockTypeCounts) blockTypeCounts[b.type as keyof typeof blockTypeCounts]++ })
 
-  const loadModuleQuiz = (navTarget: number | "back") => {
-    quizNavTarget.current = navTarget
-    setModuleQuizAnswers({})
-    setModuleQuizScore(null)
-
-    const quizTask = (mod.tasks || []).find(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0)
-    if (!quizTask || !quizTask.assessment) {
-      if (data) onMarkViewed(data.resource.id, data.moduleIdx)
-      if (navTarget !== null) {
-        if (navTarget === "back") onBack()
-        else onNavigate(navTarget)
-      }
-      return
-    }
-
-    setModuleQuiz(quizTask.assessment.questions.map(q => ({
-      id: q.id,
-      text: q.text,
-      type: q.type,
-      options: q.options,
-      correctAnswer: q.correctAnswer,
-    })))
-    setQuizState("active")
-  }
-
-  const gradeQuiz = async () => {
-    let correct = 0
-    moduleQuiz.forEach(q => {
-      if (moduleQuizAnswers[q.id] === q.correctAnswer) correct++
-    })
-    const score = Math.round((correct / moduleQuiz.length) * 100)
-    setModuleQuizScore({ score: correct, total: moduleQuiz.length })
-    if (score >= 60) {
-      setQuizState("passed")
-    } else {
-      setQuizState("failed")
-    }
-    try {
-      const quizTask = (mod.tasks || []).find(t => t.type === "quiz" && t.assessment)
-      await addDoc(collection(db, "quizSubmissions"), {
-        resourceId: data.resource.id,
-        moduleIdx: data.moduleIdx,
-        moduleId: `${data.resource.id}_${data.moduleIdx}`,
-        studentId: user?.uid || "",
-        studentName: user?.displayName || user?.email || "",
-        quizTitle: quizTask?.assessment?.title || mod.name || `Module ${data.moduleIdx + 1}`,
-        score: correct,
-        total: moduleQuiz.length,
-        percentage: score,
-        answers: moduleQuizAnswers,
-        passed: score >= 60,
-        submittedAt: serverTimestamp(),
-      })
-    } catch (err) {
-      console.error("Failed to save quiz result:", err)
-    }
-  }
-
   const handleConfirmMarkRead = () => {
     const navTarget = confirmNav ? confirmNav.target : null
     setConfirmNav(null)
     if (data && !viewedModules.includes(data.moduleIdx)) {
-      loadModuleQuiz(navTarget ?? "back")
+      onMarkViewed(data.resource.id, data.moduleIdx)
+      setCongratsState({ resourceId: data.resource.id, moduleIdx: data.moduleIdx, moduleName: mod.name || `Module ${data.moduleIdx + 1}` })
     } else {
       if (data) onMarkViewed(data.resource.id, data.moduleIdx)
       if (navTarget !== null) {
@@ -1752,20 +1653,20 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, u
     }
   }
 
-  const handleQuizContinue = () => {
-    if (data) onMarkViewed(data.resource.id, data.moduleIdx)
-    const target = quizNavTarget.current
-    quizNavTarget.current = null
-    setQuizState(null)
-    if (target !== null) {
-      if (target === "back") onBack()
-      else onNavigate(target)
-    }
+  const handleCongratsViewTasks = () => {
+    const state = congratsState
+    setCongratsState(null)
+    if (state) onGoToProgress(state.resourceId, state.moduleIdx)
   }
 
-  const handleQuizRetry = () => {
-    const target = quizNavTarget.current
-    if (target !== null) loadModuleQuiz(target)
+  const handleCongratsContinue = () => {
+    const state = congratsState
+    setCongratsState(null)
+    if (data) {
+      const nextIdx = data.moduleIdx + 1
+      if (nextIdx < mods.length) onNavigate(nextIdx)
+      else onBack()
+    }
   }
 
   const handleConfirmSkip = () => {
@@ -1843,7 +1744,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, u
           ) : (
             <div className="space-y-6">
               {mod.blocks.map((block, blockIdx) => (
-                <div key={block.id} className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+                <div key={block.id} className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-x-auto overflow-y-hidden">
                   {/* Block header */}
                   {block.topic ? (
                     <div className="px-5 pt-4 pb-3 border-b border-gray-50">
@@ -1874,18 +1775,36 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, u
                   )}
 
                   {/* Block body */}
-                  <div className="px-5 pb-5 pt-3">
-                    {block.description && (
-                      <div
-                        className="tiptap-preview prose prose-sm max-w-none"
-                        dangerouslySetInnerHTML={{ __html: block.description }}
-                      />
-                    )}
-                    {block.type === "image" && block.imageData && (
-                      <div className="mt-3">
-                        <img src={block.imageData} alt="" className="max-w-full max-h-96 rounded-xl border object-contain mx-auto" />
-                      </div>
-                    )}
+                  <div className="px-5 pb-5 pt-3 overflow-x-auto">
+                    {(() => {
+                      const allImages: { src: string; alt: string }[] = []
+                      let textHtml = block.description || ""
+                      if (textHtml) {
+                        const tmp = document.createElement("div")
+                        tmp.innerHTML = textHtml
+                        tmp.querySelectorAll("img").forEach((img) => {
+                          allImages.push({ src: img.getAttribute("src") || "", alt: img.getAttribute("alt") || "" })
+                          img.remove()
+                        })
+                        textHtml = tmp.innerHTML.trim()
+                      }
+                      if (block.type === "image" && block.imageData) {
+                        allImages.push({ src: block.imageData, alt: "" })
+                      }
+                      return (
+                        <>
+                          {textHtml && (
+                            <div
+                              className="tiptap-preview prose prose-sm max-w-none"
+                              dangerouslySetInnerHTML={{ __html: textHtml }}
+                            />
+                          )}
+                          {allImages.length > 0 && (
+                            <ImageCarousel images={allImages} />
+                          )}
+                        </>
+                      )
+                    })()}
                   </div>
                 </div>
               ))}
@@ -1919,7 +1838,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, u
         .tiptap-preview img { max-width: 100%; border-radius: 8px; margin: 0.5rem 0; }
         .tiptap-preview img[data-float="left"] { float: left; margin: 0.25rem 1rem 0.5rem 0; max-width: 50%; }
         .tiptap-preview img[data-float="right"] { float: right; margin: 0.25rem 0 0.5rem 1rem; max-width: 50%; }
-        .tiptap-preview table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+        .tiptap-preview table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; table-layout: auto; }
         .tiptap-preview td, .tiptap-preview th { border: 1px solid #d1d5db; padding: 0.125rem 0.25rem; line-height: 1.4; }
         .tiptap-preview td p, .tiptap-preview th p { margin: 0; }
         .tiptap-preview th { background: #f3f4f6; font-weight: 600; }
@@ -1930,119 +1849,48 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, u
         .tiptap-preview p { margin: 0.25rem 0; }
       `}</style>
 
-      {/* Module Quiz Overlay */}
-      {quizState && (
+      {/* Congratulations Popup */}
+      {congratsState && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col overflow-hidden"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
             style={{ animation: "slideIn 0.3s cubic-bezier(0.16,1,0.3,1) forwards" }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Active quiz */}
-            {quizState === "active" && (
-              <>
-                <div className="bg-gradient-to-br from-navy-500 to-navy-600 px-6 py-5 text-white shrink-0">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                      <i className="fas fa-clipboard-list text-white" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] font-medium opacity-70">Module Quiz</p>
-                      <h3 className="text-base font-bold leading-tight">{mod.name || `Module ${data.moduleIdx + 1}`}</h3>
-                    </div>
-                  </div>
-                  <p className="text-xs opacity-80">Answer all questions to continue. You need 60% or higher to pass.</p>
-                </div>
-
-                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-                  {moduleQuiz.map((q, qi) => (
-                    <div key={q.id} className="rounded-xl border border-gray-200 p-5">
-                      <div className="flex items-start gap-3 mb-4">
-                        <span className="w-7 h-7 rounded-lg bg-navy-50 text-navy-600 flex items-center justify-center text-xs font-bold shrink-0">{qi + 1}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-800 leading-relaxed">{q.text}</p>
-                          <span className="text-[10px] font-medium text-gray-400 mt-1 inline-block">{q.type}</span>
-                        </div>
-                      </div>
-                      <div className="space-y-2 ml-10">
-                        {q.options.map((opt) => {
-                          const selected = moduleQuizAnswers[q.id] === opt
-                          return (
-                            <button key={opt} onClick={() => setModuleQuizAnswers(prev => ({ ...prev, [q.id]: opt }))}
-                              className={`w-full text-left px-4 py-2.5 rounded-xl text-sm border transition flex items-center gap-3 ${
-                                selected ? "bg-navy-50 border-navy-300 text-navy-700 font-medium" : "bg-white border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
-                              }`}>
-                              <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition ${
-                                selected ? "border-navy-500 bg-navy-500" : "border-gray-300"
-                              }`}>
-                                {selected && <span className="w-2 h-2 rounded-full bg-white" />}
-                              </span>
-                              {opt}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center bg-gray-50/50 shrink-0">
-                  <span className="text-xs text-gray-400">
-                    {Object.keys(moduleQuizAnswers).length}/{moduleQuiz.length} answered
-                  </span>
-                  <div className="flex gap-3">
-                    <button onClick={() => { quizNavTarget.current = null; setQuizState(null) }}
-                      className="px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition">
-                      Cancel
-                    </button>
-                    <button onClick={gradeQuiz}
-                      disabled={Object.keys(moduleQuizAnswers).length < moduleQuiz.length}
-                      className="px-5 py-2.5 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2">
-                      <i className="fas fa-check-circle text-xs" />Submit Quiz
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Passed */}
-            {quizState === "passed" && moduleQuizScore && (
-              <div className="flex flex-col items-center justify-center py-16 px-8">
-                <div className="w-16 h-16 rounded-2xl bg-green-50 flex items-center justify-center mb-5">
-                  <i className="fas fa-check-circle text-2xl text-green-500" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-800 mb-1">Quiz Passed!</h3>
-                <p className="text-sm text-gray-400 mb-4">Great work! You scored {moduleQuizScore.score}/{moduleQuizScore.total} ({Math.round((moduleQuizScore.score / moduleQuizScore.total) * 100)}%)</p>
-                <div className="flex gap-3">
-                  <button onClick={handleQuizContinue}
-                    className="px-5 py-2.5 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center gap-2 shadow-sm shadow-navy-500/20">
-                    <i className="fas fa-arrow-right text-xs" />Continue
-                  </button>
-                </div>
+            <div className="px-6 pt-8 pb-6 text-center">
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-amber-100 to-amber-200 flex items-center justify-center mx-auto mb-5" style={{ animation: "bounceIn 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards" }}>
+                <i className="fas fa-trophy text-3xl text-amber-500" />
               </div>
-            )}
-
-            {/* Failed after grading */}
-            {quizState === "failed" && moduleQuizScore && (
-              <div className="flex flex-col items-center justify-center py-16 px-8">
-                <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mb-5">
-                  <i className="fas fa-times-circle text-2xl text-red-400" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-800 mb-1">Quiz Not Passed</h3>
-                <p className="text-sm text-gray-400 mb-1">You scored {moduleQuizScore.score}/{moduleQuizScore.total} ({Math.round((moduleQuizScore.score / moduleQuizScore.total) * 100)}%).</p>
-                <p className="text-xs text-gray-400 mb-6">You need at least 60% to pass. Review the module and try again.</p>
-                <div className="flex gap-3">
-                  <button onClick={handleQuizRetry}
-                    className="px-5 py-2.5 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center gap-2">
-                    <i className="fas fa-redo text-xs" />Retry Quiz
+              <h3 className="text-xl font-bold text-gray-800 mb-1">Amazing Work!</h3>
+              <p className="text-sm text-gray-500 mb-1">You've completed <span className="font-semibold text-navy-600">{congratsState.moduleName}</span></p>
+              {(() => {
+                const taskCount = (mods[congratsState.moduleIdx]?.tasks || []).length
+                return taskCount > 0 ? (
+                  <p className="text-sm text-gray-400 mt-2">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-navy-50 text-navy-600 text-xs font-semibold">
+                      <i className="fas fa-list-check" />{taskCount} task{taskCount !== 1 ? "s" : ""} available
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-400 mt-2">Keep going — your next module awaits!</p>
+                )
+              })()}
+            </div>
+            <div className="px-6 pb-6 space-y-2.5">
+              {(() => {
+                const taskCount = (mods[congratsState.moduleIdx]?.tasks || []).length
+                return taskCount > 0 ? (
+                  <button onClick={handleCongratsViewTasks}
+                    className="w-full py-3 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center justify-center gap-2 shadow-sm shadow-navy-500/20">
+                    <i className="fas fa-list-check text-xs" />View Tasks
                   </button>
-                  <button onClick={() => { quizNavTarget.current = null; setQuizState(null) }}
-                    className="px-5 py-2.5 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition flex items-center gap-2">
-                    <i className="fas fa-book text-xs text-gray-400" />Review Module
-                  </button>
-                </div>
-              </div>
-            )}
+                ) : null
+              })()}
+              <button onClick={handleCongratsContinue}
+                className="w-full py-3 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition flex items-center justify-center gap-2">
+                {data.moduleIdx + 1 < mods.length ? <><i className="fas fa-arrow-right text-xs" />Continue to Next Module</> : <><i className="fas fa-arrow-left text-xs" />Back to Modules</>}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2066,7 +1914,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, u
                   <h3 className="text-base font-bold leading-tight">{mod.name || `Module ${data.moduleIdx + 1}`}</h3>
                 </div>
               </div>
-              <p className="text-xs opacity-80 leading-relaxed">{viewedModules.includes(data.moduleIdx) ? "You've already completed this module." : ((mod.tasks || []).some(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0) ? "Take the module quiz to complete this module and move on." : "Mark this module as completed to move on.")}</p>
+              <p className="text-xs opacity-80 leading-relaxed">{viewedModules.includes(data.moduleIdx) ? "You've already completed this module." : "Mark this module as completed to move on."}</p>
             </div>
 
             {/* Progress context */}
@@ -2085,7 +1933,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, u
               <div className="flex flex-col gap-2.5">
                 <button onClick={handleConfirmMarkRead}
                   className="w-full py-3 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center justify-center gap-2 shadow-sm shadow-navy-500/20">
-                  <i className={`fas ${(mod.tasks || []).some(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0) ? "fa-clipboard-list" : "fa-check-circle"} text-xs`} /> {viewedModules.includes(data.moduleIdx) ? "Continue" : ((mod.tasks || []).some(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0) ? "Take Quiz & Continue" : "Mark Complete & Continue")}
+                  <i className="fas fa-check-circle text-xs" /> {viewedModules.includes(data.moduleIdx) ? "Continue" : "Complete & Continue"}
                 </button>
                 <button onClick={handleConfirmSkip}
                   className="w-full py-3 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition flex items-center justify-center gap-2">

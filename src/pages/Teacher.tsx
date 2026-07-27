@@ -14,6 +14,7 @@ import { db } from "../firebase"
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore"
 import type { NavItem, Resource, ModuleContent, ModuleBlock, TableData, ModuleAssessment } from "../types"
 import { getSubjectIcon } from "../utils/subjectIcons"
+import ImageCarousel from "../components/ImageCarousel"
 
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "th-large" },
@@ -88,10 +89,11 @@ export default function Teacher() {
   const [deletingResourceId, setDeletingResourceId] = useState<string | null>(null)
   const isDark = theme === "dark"
 
-  const modulesMissingQuiz = resModules.filter(m => {
+  const modulesInsufficientTasks = resModules.filter(m => {
     const hasContent = m.name.trim() || m.blocks.length > 0
-    const hasQuiz = (m.tasks || []).some(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0)
-    return hasContent && !hasQuiz
+    const tasks = m.tasks || []
+    const hasQuiz = tasks.some(t => t.type === "quiz" && t.assessment && t.assessment.questions.length > 0)
+    return hasContent && (tasks.length < 2 || !hasQuiz)
   })
 
   const deepCloneModules = (modules: ModuleContent[]): ModuleContent[] =>
@@ -284,7 +286,7 @@ export default function Teacher() {
 
   const handleResourceUpload = async () => {
     if (!resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0)) return
-    if (modulesMissingQuiz.length > 0) return
+    if (modulesInsufficientTasks.length > 0) return
     setResSaving(true)
     try {
       const filteredModules = resModules.filter(m => m.name.trim() || m.blocks.length > 0 || (m.tasks && m.tasks.length > 0))
@@ -1600,17 +1602,17 @@ export default function Teacher() {
                   Cancel
                 </button>
               )}
-              <button onClick={handleResourceUpload} disabled={resSaving || !resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0) || modulesMissingQuiz.length > 0}
+              <button onClick={handleResourceUpload} disabled={resSaving || !resSubject.trim() || !resTitle.trim() || resModules.every(m => !m.name.trim() && m.blocks.length === 0) || modulesInsufficientTasks.length > 0}
                 className="flex-1 py-2.5 rounded-xl bg-navy-500 text-white text-sm font-medium hover:bg-navy-600 transition flex items-center justify-center gap-2 disabled:opacity-70">
                 {resSaving ? <><i className="fas fa-spinner fa-spin text-xs" /> Saving...</> : <><i className="fas fa-save text-xs" /> {editingResourceId ? "Update" : "Save"}</>}
               </button>
             </div>
-            {modulesMissingQuiz.length > 0 && (
+            {modulesInsufficientTasks.length > 0 && (
               <div className={`flex items-start gap-2 px-4 py-2.5 rounded-xl text-xs mt-2 ${isDark ? "bg-amber-900/20 border border-amber-800/30 text-amber-300" : "bg-amber-50 border border-amber-200 text-amber-700"}`}>
                 <i className="fas fa-exclamation-triangle text-amber-500 mt-0.5" />
                 <span>
-                  <strong>Quiz required.</strong> The following module{modulesMissingQuiz.length > 1 ? "s need" : " needs"} a quiz before you can save:
-                  {" "}{modulesMissingQuiz.map(m => m.name.trim() || "Untitled").join(", ")}
+                  <strong>Tasks required.</strong> Each module must have at least 2 tasks, including 1 quiz. The following module{modulesInsufficientTasks.length > 1 ? "s need" : " needs"} more tasks:
+                  {" "}{modulesInsufficientTasks.map(m => m.name.trim() || "Untitled").join(", ")}
                 </span>
               </div>
             )}
@@ -1778,17 +1780,35 @@ export default function Teacher() {
                               {block.topic}
                             </h4>
                           )}
-                          {block.description && (
-                            <div
-                              className={`tiptap-preview prose prose-sm max-w-none ${isDark ? "prose-invert" : ""}`}
-                              dangerouslySetInnerHTML={{ __html: block.description }}
-                            />
-                          )}
-                          {block.type === "image" && block.imageData && (
-                            <div className="mt-3">
-                              <img src={block.imageData} alt="" className="max-w-full max-h-80 rounded-lg border object-contain" />
-                            </div>
-                          )}
+                          {(() => {
+                            const allImages: { src: string; alt: string }[] = []
+                            let textHtml = block.description || ""
+                            if (textHtml) {
+                              const tmp = document.createElement("div")
+                              tmp.innerHTML = textHtml
+                              tmp.querySelectorAll("img").forEach((img) => {
+                                allImages.push({ src: img.getAttribute("src") || "", alt: img.getAttribute("alt") || "" })
+                                img.remove()
+                              })
+                              textHtml = tmp.innerHTML.trim()
+                            }
+                            if (block.type === "image" && block.imageData) {
+                              allImages.push({ src: block.imageData, alt: "" })
+                            }
+                            return (
+                              <>
+                                {textHtml && (
+                                  <div
+                                    className={`tiptap-preview prose prose-sm max-w-none ${isDark ? "prose-invert" : ""}`}
+                                    dangerouslySetInnerHTML={{ __html: textHtml }}
+                                  />
+                                )}
+                                {allImages.length > 0 && (
+                                  <ImageCarousel images={allImages} />
+                                )}
+                              </>
+                            )
+                          })()}
                         </div>
                       ))}
                     </div>
