@@ -200,6 +200,18 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
     })
   }, [])
 
+  const stripEmptyParagraphs = (html: string): string => {
+    const doc = new DOMParser().parseFromString(html, "text/html")
+    const body = doc.body
+    Array.from(body.querySelectorAll("p, div")).forEach(el => {
+      const text = (el.textContent || "").replace(/[\u00a0\s]/g, "").trim()
+      if (!text && el.querySelector("table") === null && el.querySelector("img") === null) {
+        el.remove()
+      }
+    })
+    return body.innerHTML
+  }
+
   const cleanWordTable = (html: string): string => {
     const doc = new DOMParser().parseFromString(html, "text/html")
     const table = doc.querySelector("table")
@@ -388,9 +400,9 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
           event.preventDefault()
           const clean = cleanWordTable(html)
           if (clean) {
-            editorRef.current?.chain().focus().insertContent(clean).run()
+            editorRef.current?.chain().focus().insertContent(stripEmptyParagraphs(clean)).run()
           } else {
-            editorRef.current?.chain().focus().insertContent(html).run()
+            editorRef.current?.chain().focus().insertContent(stripEmptyParagraphs(html)).run()
           }
           return true
         }
