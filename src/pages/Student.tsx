@@ -616,49 +616,210 @@ export default function Student() {
                 <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
                   <p className="font-medium text-gray-500">No modules to finish yet</p>
                 </div>
+              ) : expandedCard ? (
+                (() => {
+                  const r = resources.find(res => res.id === expandedCard)
+                  if (!r) return null
+                  const subjIcon = getSubjectIcon(r.subject)
+                  const mods = r.modules || []
+                  const viewed = progressMap[r.id] || []
+                  const allViewed = mods.length > 0 && viewed.length >= mods.length
+                  const hasAssessment = !!(r.assessment && r.assessment.questions.length > 0)
+                  const sub = assessmentSubmissions[r.id]
+                  const totalTaskCount = mods.reduce((acc, m) => acc + (m.tasks || []).length, 0)
+                  const taskTypeConfig: Record<string, { icon: string; color: string; label: string }> = {
+                    assignment: { icon: "fa-book-open", color: "#1A73E8", label: "Assignment" },
+                    quiz: { icon: "fa-clipboard-list", color: "#0F9D58", label: "Quiz" },
+                    discussion: { icon: "fa-comments", color: "#E67C13", label: "Discussion" },
+                    material: { icon: "fa-newspaper", color: "#673AB7", label: "Material" },
+                  }
+
+                  return (
+                    <div className="space-y-6">
+                      {/* Back button + header */}
+                      <div>
+                        <button onClick={() => setExpandedCard(null)} className="flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-navy-600 transition mb-4">
+                          <i className="fas fa-arrow-left text-xs" />Back to Module Progress
+                        </button>
+                        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+                          <div className="flex items-start gap-4">
+                            <div className={`w-12 h-12 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0`}>
+                              <i className={`fas ${subjIcon.icon} text-xl`} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="text-lg font-bold text-gray-800">{r.title}</h3>
+                              <p className="text-xs text-gray-400 mt-0.5">{r.subject}</p>
+                              {r.description && <p className="text-sm text-gray-500 mt-2">{r.description}</p>}
+                            </div>
+                            <div className="flex flex-col items-end gap-2 shrink-0">
+                              {allViewed ? (
+                                <span className="text-xs font-semibold px-3 py-1 rounded-full bg-green-100 text-green-600">
+                                  <i className="fas fa-unlock mr-1" />All Modules Completed
+                                </span>
+                              ) : (
+                                <span className="text-xs font-semibold px-3 py-1 rounded-full bg-navy-50 text-navy-600">
+                                  {viewed.length}/{mods.length} modules viewed
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 mt-4">
+                            {mods.map((_, i) => {
+                              const isDone = viewed.includes(i)
+                              return (
+                                <div key={i} className={`flex-1 h-2 rounded-full transition-colors ${isDone ? "bg-green-400" : "bg-gray-200"}`} title={`Module ${i + 1}${isDone ? " (done)" : ""}`} />
+                              )
+                            })}
+                          </div>
+                          <div className="flex items-center gap-3 mt-2">
+                            {totalTaskCount > 0 && (
+                              <span className="text-[11px] font-medium text-gray-500">
+                                <i className="fas fa-list-check mr-1" />{totalTaskCount} task{totalTaskCount !== 1 ? "s" : ""}
+                              </span>
+                            )}
+                            {hasAssessment && (
+                              <span className="text-[11px] font-medium text-gray-500">
+                                <i className="fas fa-clipboard-check mr-1" />assessment
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Per-module tasks */}
+                      {mods.map((mod, modIdx) => {
+                        const modTasks = (mod.tasks || [])
+                        if (modTasks.length === 0) return null
+                        const isViewed = viewed.includes(modIdx)
+                        return (
+                          <div key={modIdx} id={`module-tasks-${r.id}-${modIdx}`}>
+                            <div className="flex items-center gap-3 mb-3">
+                              <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${isViewed ? "bg-green-500 text-white" : "bg-gray-200 text-gray-400"}`}>
+                                {isViewed ? <i className="fas fa-check" /> : modIdx + 1}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-semibold ${isViewed ? "text-navy-700" : "text-gray-400"}`}>{mod.name || `Module ${modIdx + 1}`}</p>
+                              </div>
+                              {!isViewed ? (
+                                <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-gray-100 text-gray-400">
+                                  <i className="fas fa-lock mr-1" />Locked
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-green-50 text-green-600">
+                                  <i className="fas fa-check-circle mr-1" />Completed
+                                </span>
+                              )}
+                            </div>
+                            <div className="space-y-2 pl-11">
+                              {modTasks.map((task) => {
+                                const tcfg = taskTypeConfig[task.type] || taskTypeConfig.assignment
+                                const quizSub = task.type === "quiz" ? quizSubmissions[`${r.id}_${modIdx}`] : undefined
+                                return (
+                                  <div key={task.id} className={`flex items-center gap-3 p-3 rounded-lg border transition ${isViewed ? "bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm" : "bg-gray-100/50 border-gray-200/50 opacity-50"}`}>
+                                    <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: tcfg.color + "18" }}>
+                                      <i className={`fas ${tcfg.icon} text-xs`} style={{ color: tcfg.color }} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className={`text-sm font-medium ${isViewed ? "text-gray-800" : "text-gray-400"}`}>{task.title || `${tcfg.label}`}</p>
+                                      <p className="text-[11px] text-gray-400">
+                                        {tcfg.label}
+                                        {task.dueDate && ` \u00B7 Due ${new Date(task.dueDate).toLocaleDateString()}`}
+                                        {task.points !== undefined && ` \u00B7 ${task.points} pts`}
+                                        {quizSub && ` \u00B7 ${quizSub.score}/${quizSub.total} (${Math.round((quizSub.score / quizSub.total) * 100)}%)`}
+                                      </p>
+                                    </div>
+                                    {isViewed ? (
+                                      quizSub ? (
+                                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${quizSub.passed ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"}`}>
+                                          {quizSub.passed ? <><i className="fas fa-check-circle mr-0.5" />Passed</> : <><i className="fas fa-times-circle mr-0.5" />Failed</>}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: tcfg.color + "18", color: tcfg.color }}>
+                                          {task.type === "material" ? "View" : "Open"}
+                                        </span>
+                                      )
+                                    ) : (
+                                      <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      })}
+
+                      {/* Final Assessment */}
+                      {hasAssessment && (
+                        <div className={`rounded-xl border p-5 ${allViewed ? "bg-amber-50/50 border-amber-200" : "bg-gray-50 border-gray-200"}`}>
+                          <p className={`text-sm font-semibold mb-3 ${allViewed ? "text-amber-700" : "text-gray-400"}`}>
+                            <i className="fas fa-clipboard-check mr-1" />
+                            {allViewed ? "Final Assessment" : "Complete all modules to unlock the final assessment"}
+                          </p>
+                          <div className={`flex items-center gap-3 p-3 rounded-lg border transition ${sub ? "bg-green-50 border-green-200" : allViewed ? "bg-white border-gray-200 hover:border-amber-300 hover:shadow-sm cursor-pointer" : "bg-gray-100 border-gray-200 opacity-60"}`}
+                            onClick={() => { if (allViewed && !sub) setActiveAssessment({ resourceId: r.id }) }}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${sub ? "bg-green-500 text-white" : allViewed ? "bg-amber-100 text-amber-600" : "bg-gray-200 text-gray-400"}`}>
+                              {sub ? <i className="fas fa-check text-xs" /> : allViewed ? <i className="fas fa-play text-xs" /> : <i className="fas fa-lock text-xs" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-sm font-medium ${sub ? "text-green-700" : allViewed ? "text-gray-800" : "text-gray-400"}`}>{r.assessment!.title || `${r.title} Assessment`}</p>
+                              <p className={`text-[11px] ${sub ? "text-green-600" : "text-gray-400"}`}>
+                                {sub ? `${sub.score}/${sub.totalPoints} (${Math.round((sub.score / sub.totalPoints) * 100)}%)` : `${r.assessment!.questions.length} question${r.assessment!.questions.length !== 1 ? "s" : ""}`}
+                              </p>
+                            </div>
+                            {sub ? (
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">
+                                <i className="fas fa-check-circle mr-0.5" />Submitted
+                              </span>
+                            ) : allViewed ? (
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 shrink-0">
+                                Start
+                              </span>
+                            ) : (
+                              <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {totalTaskCount === 0 && !hasAssessment && (
+                        <div className="bg-gray-50 rounded-xl border border-gray-200 px-5 py-4">
+                          <p className="text-sm text-gray-400"><i className="fas fa-info-circle mr-1" />No tasks or assessments added to this resource yet</p>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()
               ) : (
-                <div className="relative">
-                  {expandedCard && (
-                    <div className="absolute inset-0 bg-black/20 backdrop-blur-[1px] z-[5] rounded-xl" onClick={() => setExpandedCard(null)} />
-                  )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {resources.map((r) => {
                     const subjIcon = getSubjectIcon(r.subject)
                     const mods = r.modules || []
                     const viewed = progressMap[r.id] || []
                     const allViewed = mods.length > 0 && viewed.length >= mods.length
-                    const isExpandable = viewed.length > 0 && (mods.some(m => (m.tasks || []).length > 0) || (r.assessment && r.assessment.questions.length > 0))
                     const hasAssessment = !!(r.assessment && r.assessment.questions.length > 0)
                     const sub = assessmentSubmissions[r.id]
-                    const isExpanded = expandedCard === r.id
                     const totalTaskCount = mods.reduce((acc, m) => acc + (m.tasks || []).length, 0)
-
-                    const taskTypeConfig: Record<string, { icon: string; color: string; label: string }> = {
-                      assignment: { icon: "fa-book-open", color: "#1A73E8", label: "Assignment" },
-                      quiz: { icon: "fa-clipboard-list", color: "#0F9D58", label: "Quiz" },
-                      discussion: { icon: "fa-comments", color: "#E67C13", label: "Discussion" },
-                      material: { icon: "fa-newspaper", color: "#673AB7", label: "Material" },
-                    }
+                    const canOpen = viewed.length > 0 && (mods.some(m => (m.tasks || []).length > 0) || hasAssessment)
 
                     return (
-                      <div key={r.id} className={`relative bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 ${isExpanded ? "absolute inset-0 z-[6] shadow-xl ring-2 ring-navy-400 border-navy-300 overflow-y-auto" : ""} ${allViewed && isExpandable ? "border-green-200" : "border-gray-200"}`}>
+                      <div key={r.id}
+                        className={`relative bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 ${allViewed && canOpen ? "border-green-200" : "border-gray-200"}`}>
                         <div
-                          className={`p-4 ${isExpandable ? "cursor-pointer hover:bg-gray-50/50 transition-colors" : "cursor-not-allowed"}`}
-                          onClick={() => isExpandable ? setExpandedCard(isExpanded ? null : r.id) : undefined}
+                          className={`p-4 ${canOpen ? "cursor-pointer hover:bg-gray-50/50 transition-colors" : "cursor-not-allowed"}`}
+                          onClick={() => canOpen ? setExpandedCard(r.id) : undefined}
                         >
                           <div className="flex items-start gap-3 mb-3">
                             <div className={`w-11 h-11 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0`}>
                               <i className={`fas ${subjIcon.icon} text-lg`} />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-0.5">
-                                <h3 className="font-semibold text-gray-800 truncate">{r.title}</h3>
-                              </div>
+                              <h3 className="font-semibold text-gray-800 truncate">{r.title}</h3>
                               <p className="text-xs text-gray-400 mb-1">{r.subject}</p>
                               {r.description && <p className="text-[11px] text-gray-400 line-clamp-2 leading-relaxed">{r.description}</p>}
                             </div>
                             <div className="flex flex-col items-end gap-1.5 shrink-0">
-                              {allViewed && isExpandable ? (
+                              {allViewed && canOpen ? (
                                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
                                   <i className="fas fa-unlock mr-0.5" />Unlocked
                                 </span>
@@ -670,9 +831,6 @@ export default function Student() {
                                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-navy-50 text-navy-600">
                                   {viewed.length}/{mods.length}
                                 </span>
-                              )}
-                              {isExpandable && (
-                                <i className={`fas fa-chevron-${isExpanded ? "up" : "down"} text-gray-400 text-xs transition-transform`} />
                               )}
                             </div>
                           </div>
@@ -705,113 +863,6 @@ export default function Student() {
                           </div>
                         </div>
 
-                        {isExpanded && (
-                          <div className="border-t border-gray-100">
-                            {/* Per-module tasks */}
-                            {mods.map((mod, modIdx) => {
-                              const modTasks = (mod.tasks || [])
-                              if (modTasks.length === 0) return null
-                              const isViewed = viewed.includes(modIdx)
-                              return (
-                                <div key={modIdx} id={`module-tasks-${r.id}-${modIdx}`} className={`border-b border-gray-50 last:border-b-0 ${isViewed ? "bg-navy-50/30" : "bg-gray-50/50"}`}>
-                                  <div className="px-4 py-2.5 flex items-center gap-2">
-                                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${isViewed ? "bg-green-500 text-white" : "bg-gray-200 text-gray-400"}`}>
-                                      {isViewed ? <i className="fas fa-check" /> : modIdx + 1}
-                                    </span>
-                                    <div className="flex-1 min-w-0">
-                                      <p className={`text-xs font-semibold ${isViewed ? "text-navy-700" : "text-gray-400"}`}>{mod.name || `Module ${modIdx + 1}`}</p>
-                                    </div>
-                                    {!isViewed && (
-                                      <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-400">
-                                        <i className="fas fa-lock mr-0.5" />Locked
-                                      </span>
-                                    )}
-                                    {isViewed && (
-                                      <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-green-50 text-green-600">
-                                        <i className="fas fa-check-circle mr-0.5" />Completed
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="px-4 pb-3 space-y-1.5">
-                                    {modTasks.map((task) => {
-                                      const tcfg = taskTypeConfig[task.type] || taskTypeConfig.assignment
-                                      const quizSub = task.type === "quiz" ? quizSubmissions[`${r.id}_${modIdx}`] : undefined
-                                      return (
-                                        <div key={task.id} className={`flex items-center gap-3 p-3 rounded-lg border transition ${isViewed ? "bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm" : "bg-gray-100/50 border-gray-200/50 opacity-50"}`}>
-                                          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: tcfg.color + "18" }}>
-                                            <i className={`fas ${tcfg.icon} text-xs`} style={{ color: tcfg.color }} />
-                                          </div>
-                                          <div className="flex-1 min-w-0">
-                                            <p className={`text-sm font-medium ${isViewed ? "text-gray-800" : "text-gray-400"}`}>{task.title || `${tcfg.label}`}</p>
-                                            <p className="text-[11px] text-gray-400">
-                                              {tcfg.label}
-                                              {task.dueDate && ` \u00B7 Due ${new Date(task.dueDate).toLocaleDateString()}`}
-                                              {task.points !== undefined && ` \u00B7 ${task.points} pts`}
-                                              {quizSub && ` \u00B7 ${quizSub.score}/${quizSub.total} (${Math.round((quizSub.score / quizSub.total) * 100)}%)`}
-                                            </p>
-                                          </div>
-                                          {isViewed ? (
-                                            quizSub ? (
-                                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${quizSub.passed ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"}`}>
-                                                {quizSub.passed ? <><i className="fas fa-check-circle mr-0.5" />Passed</> : <><i className="fas fa-times-circle mr-0.5" />Failed</>}
-                                              </span>
-                                            ) : (
-                                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: tcfg.color + "18", color: tcfg.color }}>
-                                                {task.type === "material" ? "View" : "Open"}
-                                              </span>
-                                            )
-                                          ) : (
-                                            <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
-                                          )}
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                </div>
-                              )
-                            })}
-
-                            {/* Final Assessment */}
-                            {hasAssessment && (
-                              <div className={`px-4 py-3 ${allViewed ? "bg-amber-50/50" : "bg-gray-50"}`}>
-                                <p className={`text-xs font-semibold mb-2 ${allViewed ? "text-amber-700" : "text-gray-400"}`}>
-                                  <i className="fas fa-clipboard-check mr-1" />
-                                  {allViewed ? "Final Assessment" : "Complete all modules to unlock the final assessment"}
-                                </p>
-                                <div className={`flex items-center gap-3 p-3 rounded-lg border transition ${sub ? "bg-green-50 border-green-200" : allViewed ? "bg-white border-gray-200 hover:border-amber-300 hover:shadow-sm cursor-pointer" : "bg-gray-100 border-gray-200 opacity-60"}`}
-                                  onClick={(e) => { e.stopPropagation(); if (allViewed && !sub) setActiveAssessment({ resourceId: r.id }) }}>
-                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${sub ? "bg-green-500 text-white" : allViewed ? "bg-amber-100 text-amber-600" : "bg-gray-200 text-gray-400"}`}>
-                                    {sub ? <i className="fas fa-check text-xs" /> : allViewed ? <i className="fas fa-play text-xs" /> : <i className="fas fa-lock text-xs" />}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <p className={`text-sm font-medium ${sub ? "text-green-700" : allViewed ? "text-gray-800" : "text-gray-400"}`}>{r.assessment!.title || `${r.title} Assessment`}</p>
-                                    <p className={`text-[11px] ${sub ? "text-green-600" : "text-gray-400"}`}>
-                                      {sub ? `${sub.score}/${sub.totalPoints} (${Math.round((sub.score / sub.totalPoints) * 100)}%)` : `${r.assessment!.questions.length} question${r.assessment!.questions.length !== 1 ? "s" : ""}`}
-                                    </p>
-                                  </div>
-                                  {sub ? (
-                                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600 shrink-0">
-                                      <i className="fas fa-check-circle mr-0.5" />Submitted
-                                    </span>
-                                  ) : allViewed ? (
-                                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 shrink-0">
-                                      Start
-                                    </span>
-                                  ) : (
-                                    <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
-                                  )}
-                                </div>
-                              </div>
-                            )}
-
-                            {totalTaskCount === 0 && !hasAssessment && (
-                              <div className="bg-gray-50 px-4 py-3">
-                                <p className="text-xs text-gray-400"><i className="fas fa-info-circle mr-1" />No tasks or assessments added to this resource yet</p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
                         {viewed.length === 0 && (
                           <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] flex flex-col items-center justify-center z-10 rounded-xl pointer-events-none">
                             <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center mb-2 shadow-sm">
@@ -824,7 +875,6 @@ export default function Student() {
                       </div>
                     )
                   })}
-                  </div>
                 </div>
               )}
             </div>
