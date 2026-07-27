@@ -617,7 +617,11 @@ export default function Student() {
                   <p className="font-medium text-gray-500">No modules to finish yet</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="relative">
+                  {expandedCard && (
+                    <div className="absolute inset-0 bg-black/20 backdrop-blur-[1px] z-[5] rounded-xl" onClick={() => setExpandedCard(null)} />
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {resources.map((r) => {
                     const subjIcon = getSubjectIcon(r.subject)
                     const mods = r.modules || []
@@ -637,7 +641,7 @@ export default function Student() {
                     }
 
                     return (
-                      <div key={r.id} className={`relative bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 ${isExpanded ? "sm:col-span-2 lg:col-span-3 shadow-md ring-2 ring-navy-400 border-navy-300" : ""} ${allViewed && isExpandable ? "border-green-200" : "border-gray-200"}`}>
+                      <div key={r.id} className={`relative bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 ${isExpanded ? "absolute inset-0 z-[6] shadow-xl ring-2 ring-navy-400 border-navy-300 overflow-y-auto" : ""} ${allViewed && isExpandable ? "border-green-200" : "border-gray-200"}`}>
                         <div
                           className={`p-4 ${isExpandable ? "cursor-pointer hover:bg-gray-50/50 transition-colors" : "cursor-not-allowed"}`}
                           onClick={() => isExpandable ? setExpandedCard(isExpanded ? null : r.id) : undefined}
@@ -820,6 +824,7 @@ export default function Student() {
                       </div>
                     )
                   })}
+                  </div>
                 </div>
               )}
             </div>
