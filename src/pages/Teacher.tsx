@@ -84,6 +84,7 @@ export default function Teacher() {
   const moduleScrollRefs = useRef<(HTMLDivElement | null)[]>([])
   const moduleScrollContainerRef = useRef<HTMLDivElement | null>(null)
   const sidebarItemRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const lastExplicitClickRef = useRef<number>(0)
   const [previewResource, setPreviewResource] = useState<Resource | null>(null)
   const [editingResourceId, setEditingResourceId] = useState<string | null>(null)
   const [deletingResourceId, setDeletingResourceId] = useState<string | null>(null)
@@ -261,6 +262,7 @@ export default function Teacher() {
     if (!container) return
     const observer = new IntersectionObserver(
       (entries) => {
+        if (Date.now() - lastExplicitClickRef.current < 1000) return
         for (const entry of entries) {
           if (entry.isIntersecting) {
             const idx = moduleScrollRefs.current.indexOf(entry.target as HTMLDivElement)
@@ -1494,6 +1496,7 @@ export default function Teacher() {
                           <button
                             ref={(el) => { sidebarItemRefs.current[idx] = el }}
                             onClick={() => {
+                              lastExplicitClickRef.current = Date.now()
                               setSelectedModuleIdx(idx)
                               moduleScrollRefs.current[idx]?.scrollIntoView({ behavior: "smooth", block: "start" })
                             }}
@@ -1568,7 +1571,7 @@ export default function Teacher() {
               {/* ── Main content area ── */}
               <div ref={moduleScrollContainerRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
                 {resModules.map((mod, idx) => (
-                  <div key={idx} ref={(el) => { moduleScrollRefs.current[idx] = el }} className="scroll-mt-4" onClick={() => setSelectedModuleIdx(idx)}>
+                  <div key={idx} ref={(el) => { moduleScrollRefs.current[idx] = el }} className="scroll-mt-4" onClick={() => { lastExplicitClickRef.current = Date.now(); setSelectedModuleIdx(idx) }}>
                     <BlockEditor
                       module={mod}
                       index={idx}
