@@ -808,8 +808,6 @@ export default function Student() {
                     return (
                       <div key={r.id}
                         className={`relative bg-gray-50/80 rounded-xl overflow-hidden transition-all duration-200 ${allViewed && canOpen ? "shadow-md" : "shadow-sm hover:shadow-md"}`}>
-                        {/* Left accent bar */}
-                        <div className={`absolute left-0 top-0 bottom-0 w-1 ${allViewed && canOpen ? "bg-green-500" : "bg-navy-400"}`} />
                         <div
                           className={`p-4 pl-5 ${canOpen ? "cursor-pointer hover:bg-white/60 transition-colors" : "cursor-not-allowed"}`}
                           onClick={() => canOpen ? setExpandedCard(r.id) : undefined}
@@ -1580,8 +1578,6 @@ function ModuleCard({ title, subtitle, icon, color, lessonsText, pct, btnText, s
 
   return (
     <div ref={ref} className="bg-white rounded-2xl shadow-md hover:shadow-lg transition-shadow duration-300 h-full flex flex-col relative overflow-hidden">
-      {/* Top accent bar */}
-      <div className={`h-1.5 w-full ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-purple-500" : "bg-gray-200"}`} />
       <div className="p-5 flex flex-col flex-1">
         <div className="flex items-start gap-3 mb-4">
           <div className={`w-14 h-14 rounded-2xl ${color} flex items-center justify-center shrink-0 shadow-sm`}>
