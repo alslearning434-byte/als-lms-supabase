@@ -807,7 +807,7 @@ export default function Student() {
 
                     return (
                       <div key={r.id}
-                        className={`relative rounded-2xl overflow-hidden transition-all duration-300 border ${allViewed && canOpen ? "bg-gradient-to-br from-green-50 to-emerald-100 shadow-lg shadow-green-500/10 border-green-200" : viewed.length > 0 ? "bg-gradient-to-br from-blue-50 to-indigo-50 shadow-md shadow-blue-500/10 hover:shadow-lg hover:shadow-blue-500/15 border-blue-200" : "bg-white shadow-sm hover:shadow-md border-gray-200"}`}>
+                        className={`relative rounded-2xl overflow-hidden transition-all duration-300 border ${allViewed && canOpen ? "bg-gradient-to-br from-green-50 to-emerald-100 shadow-lg shadow-green-500/10 border-green-200" : viewed.length > 0 ? "bg-white shadow-md hover:shadow-lg border-gray-200" : "bg-white shadow-sm hover:shadow-md border-gray-200"}`}>
                         <div
                           className={`p-5 ${canOpen ? "cursor-pointer" : "cursor-not-allowed"}`}
                           onClick={() => canOpen ? setExpandedCard(r.id) : undefined}
@@ -837,7 +837,7 @@ export default function Student() {
 
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <span className={`text-xs font-bold ${allViewed ? "text-green-600" : viewed.length > 0 ? "text-blue-600" : "text-gray-400"}`}>{viewed.length}/{mods.length}</span>
+                              <span className={`text-xs font-bold ${allViewed ? "text-green-600" : viewed.length > 0 ? "text-gray-700" : "text-gray-400"}`}>{viewed.length}/{mods.length}</span>
                               <span className="text-[10px] text-gray-400">modules</span>
                             </div>
                             <div className="flex items-center gap-1.5">
