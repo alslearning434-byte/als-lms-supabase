@@ -1432,6 +1432,45 @@ export default function Student() {
         const cfg = taskTypeConfig[task.type] || taskTypeConfig.assignment
 
         if (task.type === "quiz" && task.assessment) {
+          const quizSub = quizSubmissions[`${r.id}_${moduleIdx}`]
+          if (quizSub) {
+            const pct = Math.round((quizSub.score / quizSub.total) * 100)
+            return (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setActiveModuleTask(null)}>
+                <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                  <div className={`px-6 py-8 text-center ${quizSub.passed ? "bg-gradient-to-br from-green-50 to-emerald-50" : "bg-gradient-to-br from-red-50 to-orange-50"}`}>
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${quizSub.passed ? "bg-green-100" : "bg-red-100"}`}>
+                      <i className={`fas ${quizSub.passed ? "fa-check text-green-500" : "fa-times text-red-500"} text-3xl`} />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-1">{quizSub.passed ? "Quiz Passed!" : "Quiz Failed"}</h3>
+                    <p className="text-sm text-gray-500">{task.title || "Quiz"}</p>
+                  </div>
+                  <div className="px-6 py-5 space-y-4">
+                    <div className="flex items-center justify-center gap-6">
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-gray-800">{quizSub.score}</p>
+                        <p className="text-[10px] text-gray-400 uppercase tracking-wide">Correct</p>
+                      </div>
+                      <div className="w-px h-8 bg-gray-200" />
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-gray-800">{quizSub.total}</p>
+                        <p className="text-[10px] text-gray-400 uppercase tracking-wide">Total</p>
+                      </div>
+                      <div className="w-px h-8 bg-gray-200" />
+                      <div className="text-center">
+                        <p className={`text-2xl font-bold ${quizSub.passed ? "text-green-600" : "text-red-500"}`}>{pct}%</p>
+                        <p className="text-[10px] text-gray-400 uppercase tracking-wide">Score</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setActiveModuleTask(null)}
+                      className="w-full py-2.5 bg-gray-100 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-200 transition">
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          }
           return (
             <AssessmentTaker
               resourceId={r.id}
