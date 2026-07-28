@@ -35,6 +35,7 @@ interface Props {
   onChange: (tasks: ModuleTask[]) => void
   isDark?: boolean
   moduleData?: { name: string; description: string; blocks: ModuleBlock[]; subject: string }
+  activeContentId?: string | null
 }
 
 interface AIQuizQuestion {
@@ -46,7 +47,7 @@ interface AIQuizQuestion {
   required?: boolean
 }
 
-export default function TaskBuilder({ tasks, onChange, isDark, moduleData }: Props) {
+export default function TaskBuilder({ tasks, onChange, isDark, moduleData, activeContentId }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [typeMenuOpen, setTypeMenuOpen] = useState(false)
   const [aiGenerating, setAiGenerating] = useState<string | null>(null)
@@ -78,8 +79,12 @@ export default function TaskBuilder({ tasks, onChange, isDark, moduleData }: Pro
   const renderTask = (task: ModuleTask, isQuiz: boolean) => {
     const cfg = typeConfig(task.type)
     const isExpanded = expandedId === task.id
+    const isHighlighted = activeContentId === task.id
     return (
-      <div key={task.id} data-task-id={task.id} className={`rounded-xl border overflow-hidden transition group/task ${isDark ? "bg-gray-800/50 border-gray-700" : "bg-white border-gray-200"}`}>
+      <div key={task.id} data-task-id={task.id} className={`rounded-xl border overflow-hidden transition-all duration-300 group/task ${isHighlighted
+        ? isDark ? "border-emerald-500 ring-2 ring-emerald-500/30 shadow-lg shadow-emerald-500/10 bg-emerald-900/10" : "border-emerald-400 ring-2 ring-emerald-400/30 shadow-lg shadow-emerald-500/10 bg-emerald-50/50"
+        : isDark ? "bg-gray-800/50 border-gray-700" : "bg-white border-gray-200"
+      }`}>
         <div className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition ${isDark ? "hover:bg-gray-700/50" : "hover:bg-gray-50"}`}
           onClick={() => setExpandedId(isExpanded ? null : task.id)}>
           <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: cfg.color + "18" }}>

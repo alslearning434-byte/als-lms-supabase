@@ -89,6 +89,8 @@ export default function Teacher() {
   const userScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const forceFocusIdxRef = useRef<number | null>(null)
   const forceFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [activeContentId, setActiveContentId] = useState<string | null>(null)
+  const activeContentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [previewResource, setPreviewResource] = useState<Resource | null>(null)
   const [editingResourceId, setEditingResourceId] = useState<string | null>(null)
   const [deletingResourceId, setDeletingResourceId] = useState<string | null>(null)
@@ -1558,6 +1560,9 @@ export default function Teacher() {
                                       if (forceFocusTimerRef.current) clearTimeout(forceFocusTimerRef.current)
                                       forceFocusTimerRef.current = setTimeout(() => { forceFocusIdxRef.current = null }, 3000)
                                       setSelectedModuleIdx(idx)
+                                      setActiveContentId(b.id)
+                                      if (activeContentTimerRef.current) clearTimeout(activeContentTimerRef.current)
+                                      activeContentTimerRef.current = setTimeout(() => setActiveContentId(null), 3000)
                                       const container = moduleScrollContainerRef.current
                                       const target = container?.querySelector(`[data-block-id="${b.id}"]`)
                                       target?.scrollIntoView({ behavior: "smooth", block: "center" })
@@ -1581,6 +1586,9 @@ export default function Teacher() {
                                       if (forceFocusTimerRef.current) clearTimeout(forceFocusTimerRef.current)
                                       forceFocusTimerRef.current = setTimeout(() => { forceFocusIdxRef.current = null }, 3000)
                                       setSelectedModuleIdx(idx)
+                                      setActiveContentId(task.id)
+                                      if (activeContentTimerRef.current) clearTimeout(activeContentTimerRef.current)
+                                      activeContentTimerRef.current = setTimeout(() => setActiveContentId(null), 3000)
                                       const container = moduleScrollContainerRef.current
                                       const target = container?.querySelector(`[data-task-id="${task.id}"]`)
                                       target?.scrollIntoView({ behavior: "smooth", block: "center" })
@@ -1626,6 +1634,7 @@ export default function Teacher() {
                       isDark={isDark}
                       subject={resSubject}
                       isActive={selectedModuleIdx === idx}
+                      activeContentId={activeContentId}
                     />
                   </div>
                 ))}

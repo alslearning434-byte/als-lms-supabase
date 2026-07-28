@@ -12,6 +12,7 @@ interface BlockEditorProps {
   isDark?: boolean
   subject?: string
   isActive?: boolean
+  activeContentId?: string | null
 }
 
 let blockIdCounter = 0
@@ -31,7 +32,7 @@ const blockTypeConfig: Record<string, { label: string; icon: string; color: stri
   table: { label: "Content", icon: "fa-align-left", color: "bg-blue-100 text-blue-600" },
 }
 
-export default function BlockEditor({ module, index, moduleCount, onChange, onRemove, isDark, subject, isActive }: BlockEditorProps) {
+export default function BlockEditor({ module, index, moduleCount, onChange, onRemove, isDark, subject, isActive, activeContentId }: BlockEditorProps) {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; blockIdx: number } | null>(null)
   const ctxMenuRef = useRef<HTMLDivElement>(null)
 
@@ -120,8 +121,12 @@ export default function BlockEditor({ module, index, moduleCount, onChange, onRe
 
       {module.blocks.map((block, blockIdx) => {
         const cfg = blockTypeConfig[block.type]
+        const isHighlighted = activeContentId === block.id
         return (
-          <div key={block.id} data-block-id={block.id} className={`rounded-lg border p-3 space-y-2 ${isDark ? "bg-gray-900/50 border-gray-700" : "bg-white border-gray-200"}`}
+          <div key={block.id} data-block-id={block.id} className={`rounded-lg border p-3 space-y-2 transition-all duration-300 ${isHighlighted
+            ? isDark ? "border-emerald-500 ring-2 ring-emerald-500/30 shadow-lg shadow-emerald-500/10 bg-emerald-900/10" : "border-emerald-400 ring-2 ring-emerald-400/30 shadow-lg shadow-emerald-500/10 bg-emerald-50/50"
+            : isDark ? "bg-gray-900/50 border-gray-700" : "bg-white border-gray-200"
+          }`}
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, blockIdx }) }}>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -192,6 +197,7 @@ export default function BlockEditor({ module, index, moduleCount, onChange, onRe
           onChange={(tasks) => onChange({ ...module, tasks })}
           isDark={isDark}
           moduleData={{ name: module.name, description: module.description, blocks: module.blocks, subject: subject || "" }}
+          activeContentId={activeContentId}
         />
       </div>
 
