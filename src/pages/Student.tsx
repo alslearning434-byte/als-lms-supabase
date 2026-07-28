@@ -75,7 +75,7 @@ export default function Student() {
       "Start": "Simulan",
       "Module Progress": "Progreso ng Modyul",
       "Unlock Activities, Tasks, Quizzes, and Assignments by completing each module.": "I-unlock ang mga Aktibidad, Gawain, Pagsusulit, at Takdang-aralin sa pamamagitan ng pagkumpleto ng bawat modyul.",
-      "Unlocked": "Naka-unlock",
+      "Unlocked": "Completed",
       "Complete this module to unlock": "Kumpletuhin ang modyul na ito para ma-unlock",
       "Activities": "Mga Aktibidad",
       "Task": "Gawain",
@@ -824,7 +824,7 @@ export default function Student() {
                             <div className="flex flex-col items-end gap-1.5 shrink-0">
                               {allViewed && canOpen ? (
                                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
-                                  <i className="fas fa-unlock mr-0.5" />Unlocked
+                                  <i className="fas fa-unlock mr-0.5" />Completed
                                 </span>
                               ) : viewed.length === 0 ? (
                                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
