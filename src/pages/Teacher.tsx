@@ -365,6 +365,7 @@ export default function Teacher() {
     if (prev && JSON.stringify(prev) !== JSON.stringify(updated)) {
       pushToHistory(resModules)
     }
+    lastExplicitClickRef.current = Date.now()
     setResModules((prevModules) => prevModules.map((m, i) => i === index ? updated : m))
   }
 
