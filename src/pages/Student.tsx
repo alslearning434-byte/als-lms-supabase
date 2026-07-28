@@ -2033,12 +2033,13 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
                     className="w-full py-3 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center justify-center gap-2 shadow-sm shadow-navy-500/20">
                     <i className="fas fa-list-check text-xs" />View Tasks
                   </button>
-                ) : null
+                ) : (
+                  <button onClick={handleCongratsContinue}
+                    className="w-full py-3 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition flex items-center justify-center gap-2">
+                    {data.moduleIdx + 1 < mods.length ? <><i className="fas fa-arrow-right text-xs" />Continue to Next Module</> : <><i className="fas fa-arrow-left text-xs" />Back to Modules</>}
+                  </button>
+                )
               })()}
-              <button onClick={handleCongratsContinue}
-                className="w-full py-3 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition flex items-center justify-center gap-2">
-                {data.moduleIdx + 1 < mods.length ? <><i className="fas fa-arrow-right text-xs" />Continue to Next Module</> : <><i className="fas fa-arrow-left text-xs" />Back to Modules</>}
-              </button>
             </div>
           </div>
         </div>
