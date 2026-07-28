@@ -87,6 +87,8 @@ export default function Teacher() {
   const lastExplicitClickRef = useRef<number>(0)
   const userScrollingRef = useRef(false)
   const userScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const forceFocusIdxRef = useRef<number | null>(null)
+  const forceFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [previewResource, setPreviewResource] = useState<Resource | null>(null)
   const [editingResourceId, setEditingResourceId] = useState<string | null>(null)
   const [deletingResourceId, setDeletingResourceId] = useState<string | null>(null)
@@ -272,6 +274,7 @@ export default function Teacher() {
     const observer = new IntersectionObserver(
       (entries) => {
         if (!userScrollingRef.current) return
+        if (forceFocusIdxRef.current !== null) return
         for (const entry of entries) {
           if (entry.isIntersecting) {
             const idx = moduleScrollRefs.current.indexOf(entry.target as HTMLDivElement)
@@ -375,7 +378,14 @@ export default function Teacher() {
       pushToHistory(resModules)
     }
     lastExplicitClickRef.current = Date.now()
+    forceFocusIdxRef.current = index
+    if (forceFocusTimerRef.current) clearTimeout(forceFocusTimerRef.current)
+    forceFocusTimerRef.current = setTimeout(() => { forceFocusIdxRef.current = null }, 5000)
+    setSelectedModuleIdx(index)
     setResModules((prevModules) => prevModules.map((m, i) => i === index ? updated : m))
+    requestAnimationFrame(() => {
+      moduleScrollRefs.current[index]?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+    })
   }
 
   const openEditResource = (resource: Resource) => {
