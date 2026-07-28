@@ -1441,6 +1441,7 @@ export default function Student() {
               studentName={profile?.displayName || "Student"}
               onClose={() => setActiveModuleTask(null)}
               context="quiz"
+              moduleIdx={moduleIdx}
             />
           )
         }

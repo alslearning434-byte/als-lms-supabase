@@ -11,9 +11,10 @@ interface Props {
   studentName: string
   onClose: () => void
   context?: "quiz" | "assessment"
+  moduleIdx?: number
 }
 
-export default function AssessmentTaker({ resourceId, assessmentId, assessment, studentId, studentName, onClose, context = "assessment" }: Props) {
+export default function AssessmentTaker({ resourceId, assessmentId, assessment, studentId, studentName, onClose, context = "assessment", moduleIdx }: Props) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState(false)
   const [score, setScore] = useState<{ score: number; total: number; results: { qId: string; correct: boolean; correctAnswer: string; needsReview: boolean }[] } | null>(null)
@@ -68,6 +69,19 @@ export default function AssessmentTaker({ resourceId, assessmentId, assessment, 
       answers,
       submittedAt: new Date().toISOString(),
     }).catch(() => {})
+    if (context === "quiz" && moduleIdx !== undefined) {
+      addDoc(collection(db, "quizSubmissions"), {
+        resourceId,
+        moduleIdx,
+        studentId,
+        studentName,
+        score: sc,
+        total: results.length,
+        passed: sc >= results.length * 0.5,
+        answers,
+        submittedAt: new Date().toISOString(),
+      }).catch(() => {})
+    }
   }
 
   const autogradable = assessment.questions.filter((q) => q.type !== "Paragraph" && q.type !== "File Upload")
