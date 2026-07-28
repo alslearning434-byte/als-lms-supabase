@@ -85,6 +85,8 @@ export default function Teacher() {
   const moduleScrollContainerRef = useRef<HTMLDivElement | null>(null)
   const sidebarItemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const lastExplicitClickRef = useRef<number>(0)
+  const userScrollingRef = useRef(false)
+  const userScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [previewResource, setPreviewResource] = useState<Resource | null>(null)
   const [editingResourceId, setEditingResourceId] = useState<string | null>(null)
   const [deletingResourceId, setDeletingResourceId] = useState<string | null>(null)
@@ -260,9 +262,16 @@ export default function Teacher() {
     if (!resourceUploadOpen) return
     const container = moduleScrollContainerRef.current
     if (!container) return
+    const handleUserScroll = () => {
+      userScrollingRef.current = true
+      if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current)
+      userScrollTimerRef.current = setTimeout(() => { userScrollingRef.current = false }, 1500)
+    }
+    container.addEventListener("wheel", handleUserScroll, { passive: true })
+    container.addEventListener("touchmove", handleUserScroll, { passive: true })
     const observer = new IntersectionObserver(
       (entries) => {
-        if (Date.now() - lastExplicitClickRef.current < 3000) return
+        if (!userScrollingRef.current) return
         for (const entry of entries) {
           if (entry.isIntersecting) {
             const idx = moduleScrollRefs.current.indexOf(entry.target as HTMLDivElement)
@@ -278,7 +287,7 @@ export default function Teacher() {
     const timer = setTimeout(() => {
       moduleScrollRefs.current.forEach((el) => { if (el) observer.observe(el) })
     }, 100)
-    return () => { clearTimeout(timer); observer.disconnect() }
+    return () => { clearTimeout(timer); observer.disconnect(); container.removeEventListener("wheel", handleUserScroll); container.removeEventListener("touchmove", handleUserScroll); if (userScrollTimerRef.current) clearTimeout(userScrollTimerRef.current) }
   }, [resourceUploadOpen, resModules.length])
 
   useEffect(() => {
