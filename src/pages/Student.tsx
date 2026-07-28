@@ -1809,6 +1809,11 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
     }
   }
 
+  const handleConfirmGoBackUnread = () => {
+    setConfirmNav(null)
+    onBack()
+  }
+
   const handleCongratsViewTasks = () => {
     const state = congratsState
     setCongratsState(null)
@@ -2064,7 +2069,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
                   <h3 className="text-base font-bold leading-tight">{mod.name || `Module ${data.moduleIdx + 1}`}</h3>
                 </div>
               </div>
-              <p className="text-xs opacity-80 leading-relaxed">You need to complete this module before moving on.</p>
+              <p className="text-xs opacity-80 leading-relaxed">{confirmNav?.target === "back" ? "Leave without completing? You can come back later to finish." : "You need to complete this module before moving on."}</p>
             </div>
 
             {/* Progress context */}
@@ -2085,6 +2090,12 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
                   className="w-full py-3 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center justify-center gap-2 shadow-sm shadow-navy-500/20">
                   <i className="fas fa-check-circle text-xs" /> {viewedModules.includes(data.moduleIdx) ? "Continue" : "Complete & Continue"}
                 </button>
+                {confirmNav?.target === "back" && (
+                  <button onClick={handleConfirmGoBackUnread}
+                    className="w-full py-3 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition flex items-center justify-center gap-2">
+                    <i className="fas fa-arrow-left text-xs text-gray-400" /> Go Back (Keep Unread)
+                  </button>
+                )}
                 <button onClick={() => setConfirmNav(null)}
                   className="w-full py-2.5 text-gray-400 text-xs font-medium rounded-xl hover:text-gray-600 transition">
                   Stay on this module
