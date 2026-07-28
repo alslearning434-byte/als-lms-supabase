@@ -262,7 +262,7 @@ export default function Teacher() {
     if (!container) return
     const observer = new IntersectionObserver(
       (entries) => {
-        if (Date.now() - lastExplicitClickRef.current < 1000) return
+        if (Date.now() - lastExplicitClickRef.current < 3000) return
         for (const entry of entries) {
           if (entry.isIntersecting) {
             const idx = moduleScrollRefs.current.indexOf(entry.target as HTMLDivElement)
