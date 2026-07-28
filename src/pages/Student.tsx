@@ -807,7 +807,7 @@ export default function Student() {
 
                     return (
                       <div key={r.id}
-                        className={`relative rounded-2xl overflow-hidden transition-all duration-300 ${allViewed && canOpen ? "bg-gradient-to-br from-green-50 to-emerald-50 shadow-lg shadow-green-500/10" : viewed.length > 0 ? "bg-gradient-to-br from-navy-50/80 to-white shadow-md shadow-navy-500/5 hover:shadow-lg hover:shadow-navy-500/10" : "bg-white shadow-sm hover:shadow-md"}`}>
+                        className={`relative rounded-2xl overflow-hidden transition-all duration-300 border ${allViewed && canOpen ? "bg-gradient-to-br from-green-50 to-emerald-50 shadow-lg shadow-green-500/10 border-green-200" : viewed.length > 0 ? "bg-gradient-to-br from-navy-50/80 to-white shadow-md shadow-navy-500/5 hover:shadow-lg hover:shadow-navy-500/10 border-navy-100" : "bg-white shadow-sm hover:shadow-md border-gray-200"}`}>
                         <div
                           className={`p-5 ${canOpen ? "cursor-pointer" : "cursor-not-allowed"}`}
                           onClick={() => canOpen ? setExpandedCard(r.id) : undefined}
