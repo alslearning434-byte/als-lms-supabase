@@ -1795,7 +1795,11 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
     setConfirmNav(null)
     if (data && !viewedModules.includes(data.moduleIdx)) {
       onMarkViewed(data.resource.id, data.moduleIdx)
-      setCongratsState({ resourceId: data.resource.id, moduleIdx: data.moduleIdx, moduleName: mod.name || `Module ${data.moduleIdx + 1}` })
+      if (navTarget === "back") {
+        onBack()
+      } else {
+        setCongratsState({ resourceId: data.resource.id, moduleIdx: data.moduleIdx, moduleName: mod.name || `Module ${data.moduleIdx + 1}` })
+      }
     } else {
       if (data) onMarkViewed(data.resource.id, data.moduleIdx)
       if (navTarget !== null) {
