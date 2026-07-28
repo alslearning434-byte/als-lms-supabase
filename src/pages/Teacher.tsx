@@ -1550,10 +1550,21 @@ export default function Teacher() {
                                 const blockIcons: Record<string, string> = { content: "fa-align-left", image: "fa-image", table: "fa-table" }
                                 const blockColors: Record<string, string> = { content: "text-blue-400", image: "text-green-400", table: "text-purple-400" }
                                 return (
-                                  <div key={bi} className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                                  <button key={bi} className={`w-full text-left flex items-center gap-1.5 px-2 py-1 rounded text-[10px] cursor-pointer transition hover:bg-navy-500/10 ${isDark ? "text-gray-400 hover:bg-gray-700/50" : "text-gray-500 hover:bg-navy-50"}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      lastExplicitClickRef.current = Date.now()
+                                      forceFocusIdxRef.current = idx
+                                      if (forceFocusTimerRef.current) clearTimeout(forceFocusTimerRef.current)
+                                      forceFocusTimerRef.current = setTimeout(() => { forceFocusIdxRef.current = null }, 3000)
+                                      setSelectedModuleIdx(idx)
+                                      const container = moduleScrollContainerRef.current
+                                      const target = container?.querySelector(`[data-block-id="${b.id}"]`)
+                                      target?.scrollIntoView({ behavior: "smooth", block: "center" })
+                                    }}>
                                     <i className={`fas ${blockIcons[b.type] || "fa-cube"} ${blockColors[b.type] || "text-gray-400"} w-3 text-center`} />
                                     <span className="truncate">{b.topic || `Block ${bi + 1}`}</span>
-                                  </div>
+                                  </button>
                                 )
                               })}
 
@@ -1562,10 +1573,21 @@ export default function Teacher() {
                                 const taskIcons: Record<string, string> = { assignment: "fa-book-open", quiz: "fa-clipboard-list", discussion: "fa-comments", material: "fa-newspaper" }
                                 const taskColors: Record<string, string> = { assignment: "text-blue-400", quiz: "text-green-400", discussion: "text-orange-400", material: "text-purple-400" }
                                 return (
-                                  <div key={task.id} className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] ${taskColors[task.type] || "text-gray-400"}`}>
-                                    <i className={`fas ${taskIcons[task.type] || "fa-list"} w-3 text-center`} />
+                                  <button key={task.id} className={`w-full text-left flex items-center gap-1.5 px-2 py-1 rounded text-[10px] cursor-pointer transition hover:bg-navy-500/10 ${isDark ? "text-gray-400 hover:bg-gray-700/50" : "text-gray-500 hover:bg-navy-50"}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      lastExplicitClickRef.current = Date.now()
+                                      forceFocusIdxRef.current = idx
+                                      if (forceFocusTimerRef.current) clearTimeout(forceFocusTimerRef.current)
+                                      forceFocusTimerRef.current = setTimeout(() => { forceFocusIdxRef.current = null }, 3000)
+                                      setSelectedModuleIdx(idx)
+                                      const container = moduleScrollContainerRef.current
+                                      const target = container?.querySelector(`[data-task-id="${task.id}"]`)
+                                      target?.scrollIntoView({ behavior: "smooth", block: "center" })
+                                    }}>
+                                    <i className={`fas ${taskIcons[task.type] || "fa-list"} w-3 text-center`} style={{ color: taskColors[task.type] }} />
                                     <span className="truncate">{task.type === "quiz" ? (task.assessment?.title || "Quiz") : (task.title || task.type)}</span>
-                                  </div>
+                                  </button>
                                 )
                               })}
 

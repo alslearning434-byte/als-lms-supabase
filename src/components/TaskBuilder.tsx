@@ -79,7 +79,7 @@ export default function TaskBuilder({ tasks, onChange, isDark, moduleData }: Pro
     const cfg = typeConfig(task.type)
     const isExpanded = expandedId === task.id
     return (
-      <div key={task.id} className={`rounded-xl border overflow-hidden transition group/task ${isDark ? "bg-gray-800/50 border-gray-700" : "bg-white border-gray-200"}`}>
+      <div key={task.id} data-task-id={task.id} className={`rounded-xl border overflow-hidden transition group/task ${isDark ? "bg-gray-800/50 border-gray-700" : "bg-white border-gray-200"}`}>
         <div className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition ${isDark ? "hover:bg-gray-700/50" : "hover:bg-gray-50"}`}
           onClick={() => setExpandedId(isExpanded ? null : task.id)}>
           <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: cfg.color + "18" }}>

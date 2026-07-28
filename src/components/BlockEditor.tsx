@@ -121,7 +121,7 @@ export default function BlockEditor({ module, index, moduleCount, onChange, onRe
       {module.blocks.map((block, blockIdx) => {
         const cfg = blockTypeConfig[block.type]
         return (
-          <div key={block.id} className={`rounded-lg border p-3 space-y-2 ${isDark ? "bg-gray-900/50 border-gray-700" : "bg-white border-gray-200"}`}
+          <div key={block.id} data-block-id={block.id} className={`rounded-lg border p-3 space-y-2 ${isDark ? "bg-gray-900/50 border-gray-700" : "bg-white border-gray-200"}`}
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, blockIdx }) }}>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
