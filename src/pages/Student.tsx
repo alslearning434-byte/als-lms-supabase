@@ -807,59 +807,62 @@ export default function Student() {
 
                     return (
                       <div key={r.id}
-                        className={`relative bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 ${allViewed && canOpen ? "border-green-200" : "border-gray-200"}`}>
+                        className={`relative bg-gray-50/80 rounded-xl border overflow-hidden transition-all duration-200 ${allViewed && canOpen ? "border-green-300 shadow-md" : "border-gray-200 shadow-sm hover:shadow-md"}`}>
+                        {/* Left accent bar */}
+                        <div className={`absolute left-0 top-0 bottom-0 w-1 ${allViewed && canOpen ? "bg-green-500" : "bg-navy-400"}`} />
                         <div
-                          className={`p-4 ${canOpen ? "cursor-pointer hover:bg-gray-50/50 transition-colors" : "cursor-not-allowed"}`}
+                          className={`p-4 pl-5 ${canOpen ? "cursor-pointer hover:bg-white/60 transition-colors" : "cursor-not-allowed"}`}
                           onClick={() => canOpen ? setExpandedCard(r.id) : undefined}
                         >
                           <div className="flex items-start gap-3 mb-3">
-                            <div className={`w-11 h-11 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0`}>
-                              <i className={`fas ${subjIcon.icon} text-lg`} />
+                            <div className={`w-10 h-10 rounded-lg ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0`}>
+                              <i className={`fas ${subjIcon.icon} text-base`} />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-gray-800 truncate">{r.title}</h3>
-                              <p className="text-xs text-gray-400 mb-1">{r.subject}</p>
-                              {r.description && <p className="text-[11px] text-gray-400 line-clamp-2 leading-relaxed">{r.description}</p>}
+                              <h3 className="font-semibold text-gray-800 text-sm truncate">{r.title}</h3>
+                              <p className="text-[11px] text-gray-400">{r.subject}</p>
+                              {r.description && <p className="text-[10px] text-gray-400 line-clamp-1 mt-0.5 leading-relaxed">{r.description}</p>}
                             </div>
                             <div className="flex flex-col items-end gap-1.5 shrink-0">
                               {allViewed && canOpen ? (
-                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
-                                  <i className="fas fa-unlock mr-0.5" />Completed
+                                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-600 uppercase tracking-wider">
+                                  <i className="fas fa-check mr-0.5" />Completed
                                 </span>
                               ) : viewed.length === 0 ? (
-                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
+                                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 uppercase tracking-wider">
                                   <i className="fas fa-lock mr-0.5" />Locked
                                 </span>
                               ) : (
-                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-navy-50 text-navy-600">
+                                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-navy-100 text-navy-600 uppercase tracking-wider">
                                   {viewed.length}/{mods.length}
                                 </span>
                               )}
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 mb-2.5">
+                          {/* Module checklist dots */}
+                          <div className="flex items-center gap-1.5 mb-2.5">
                             {mods.map((_, i) => {
                               const isDone = viewed.includes(i)
                               return (
-                                <div key={i} className={`flex-1 h-1.5 rounded-full transition-colors ${isDone ? "bg-green-400" : "bg-gray-200"}`} title={`Module ${i + 1}${isDone ? " (done)" : ""}`} />
+                                <div key={i} className={`flex items-center justify-center w-5 h-5 rounded-md text-[8px] font-bold transition-colors ${isDone ? "bg-green-500 text-white" : "bg-gray-200 text-gray-400"}`} title={`Module ${i + 1}${isDone ? " (done)" : ""}`}>
+                                  {isDone ? <i className="fas fa-check" /> : i + 1}
+                                </div>
                               )
                             })}
                           </div>
 
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] text-gray-500 font-medium">{viewed.length}/{mods.length} modules</span>
-                            </div>
+                            <span className="text-[10px] text-gray-400 font-medium">{viewed.length}/{mods.length} modules viewed</span>
                             <div className="flex items-center gap-1.5">
                               {totalTaskCount > 0 && (
-                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                                  <i className="fas fa-list-check mr-0.5" />{totalTaskCount} task{totalTaskCount !== 1 ? "s" : ""}
+                                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-navy-50 text-navy-500">
+                                  <i className="fas fa-list-check mr-0.5" />{totalTaskCount}
                                 </span>
                               )}
                               {hasAssessment && (
-                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${sub ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-500"}`}>
-                                  <i className="fas fa-clipboard-check mr-0.5" />assessment
+                                <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${sub ? "bg-green-100 text-green-600" : "bg-amber-50 text-amber-500"}`}>
+                                  <i className="fas fa-clipboard-check mr-0.5" />Quiz
                                 </span>
                               )}
                             </div>
@@ -868,11 +871,11 @@ export default function Student() {
 
                         {viewed.length === 0 && (
                           <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] flex flex-col items-center justify-center z-10 rounded-xl pointer-events-none">
-                            <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center mb-2 shadow-sm">
-                              <i className="fas fa-lock text-gray-400 text-lg" />
+                            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mb-2 shadow-sm">
+                              <i className="fas fa-lock text-gray-400 text-sm" />
                             </div>
-                            <p className="text-xs font-semibold text-gray-500">No modules viewed yet</p>
-                            <p className="text-[11px] text-gray-400 mt-0.5">Complete modules to unlock tasks</p>
+                            <p className="text-[11px] font-semibold text-gray-500">No modules viewed yet</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">Complete modules to unlock tasks</p>
                           </div>
                         )}
                       </div>
@@ -1575,33 +1578,40 @@ function ModuleCard({ title, subtitle, icon, color, lessonsText, pct, btnText, s
     btnClass += "bg-purple-500 text-white hover:bg-purple-600 shadow-sm"
   }
 
-  const barColor = pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-purple-500" : "bg-gray-300"
-
   return (
-    <div ref={ref} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm h-full flex flex-col relative">
-      {status !== "finished" && (
-        <div className="absolute top-3 right-3 w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center" title="Complete all modules to finish">
-          <i className="fas fa-lock text-amber-500 text-xs" />
+    <div ref={ref} className="bg-white rounded-2xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow duration-300 h-full flex flex-col relative overflow-hidden">
+      {/* Top accent bar */}
+      <div className={`h-1.5 w-full ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-purple-500" : "bg-gray-200"}`} />
+      <div className="p-5 flex flex-col flex-1">
+        <div className="flex items-start gap-3 mb-4">
+          <div className={`w-14 h-14 rounded-2xl ${color} flex items-center justify-center shrink-0 shadow-sm`}>
+            <i className={`fas ${icon} text-2xl`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-bold text-gray-800 text-base leading-tight">{title}</h3>
+            <p className="text-[11px] text-gray-400 mt-0.5">{subtitle}</p>
+          </div>
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${status === "finished" ? "bg-green-100" : "bg-amber-100"}`}>
+            <i className={`fas ${status === "finished" ? "fa-check-circle text-green-500" : "fa-arrow-right text-amber-500"} text-sm`} />
+          </div>
         </div>
-      )}
-      {status === "finished" && (
-        <div className="absolute top-3 right-3 w-7 h-7 rounded-full bg-green-100 flex items-center justify-center" title="All modules completed">
-          <i className="fas fa-check-circle text-green-500 text-xs" />
+        <p className="text-xs text-gray-500 font-medium mb-3">{lessonsText}</p>
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Progress</span>
+            <span className={`text-[11px] font-bold ${pct >= 100 ? "text-green-600" : pct > 0 ? "text-purple-600" : "text-gray-400"}`}>{pct}%</span>
+          </div>
+          <div className="w-full h-2.5 rounded-full bg-gray-100 overflow-hidden">
+            <div className={`h-full rounded-full transition-all duration-1000 ease-out ${pct >= 100 ? "bg-green-500" : "bg-purple-500"}`}
+              style={{ width: `${animPct}%` }} />
+          </div>
         </div>
-      )}
-      <div className={`w-12 h-12 rounded-xl ${color} flex items-center justify-center mb-3`}>
-        <i className={`fas ${icon} text-xl`} />
+        <div className="mt-auto">
+          <button className={btnClass} onClick={onClick}>
+            {btnText}
+          </button>
+        </div>
       </div>
-      <h3 className="font-semibold text-gray-800 text-lg mb-1">{title}</h3>
-      <p className="text-xs text-gray-400 mb-0.5">{subtitle}</p>
-      <p className="text-sm text-gray-400 mb-3">{lessonsText}</p>
-      <div className="progress-bar mb-3">
-        <div className={`progress-fill ${barColor}`}
-          style={{ width: `${animPct}%`, transition: "width 0.8s ease-out" }} />
-      </div>
-      <button className={btnClass} onClick={onClick}>
-        {btnText}
-      </button>
     </div>
   )
 }
