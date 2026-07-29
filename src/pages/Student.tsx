@@ -33,6 +33,7 @@ export default function Student() {
   const [logoutOpen, setLogoutOpen] = useState(false)
   const [pwdOpen, setPwdOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [activeCarouselIdx, setActiveCarouselIdx] = useState(0)
   const [deadlinesExpanded, setDeadlinesExpanded] = useState(false)
   const [progressExpanded, setProgressExpanded] = useState(false)
   const [badgesExpanded, setBadgesExpanded] = useState(false)
@@ -320,6 +321,10 @@ export default function Student() {
     }
   }, [congratsTarget, activePage])
 
+  useEffect(() => {
+    setActiveCarouselIdx(0)
+  }, [resources])
+
   const markModuleViewed = async (resourceId: string, moduleIdx: number) => {
     if (!user?.uid) return
     const key = `${user.uid}_${resourceId}`
@@ -579,37 +584,64 @@ export default function Student() {
                           <p className="text-xs text-gray-400 mt-1">{t("Start a module from My Modules page")}</p>
                         </div>
                       ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
-                          {activeRes.map((r, i) => {
-                            const c = colorCycle[i % colorCycle.length]
-                            const pct = Math.round((r.viewed.length / r.total) * 100)
-                            const currentMod = r.resource.modules[r.viewed.length] || r.resource.modules[r.total - 1]
-                            return (
-                              <div key={r.resource.id} className="module-card p-5 flex flex-col">
-                                <div className="flex-1">
-                                  <div className="flex items-start justify-between mb-3">
-                                    <div className="flex-1">
-                                      <div className="flex items-center gap-2 mb-1">
-                                        <h4 className="font-semibold text-gray-800 text-lg">{r.resource.title}</h4>
-                                        <span className={`text-sm font-medium ${c.labelColor} ${c.bg} px-2.5 py-0.5 rounded`}>{pct}%</span>
+                        <div className="relative flex-1 flex flex-col">
+                          <div className="overflow-hidden flex-1">
+                            <div className="flex gap-4 transition-transform duration-400 ease-in-out"
+                              style={{ transform: `translateX(-${activeCarouselIdx * 100}%)` }}>
+                              {activeRes.map((r, i) => {
+                                const c = colorCycle[i % colorCycle.length]
+                                const pct = Math.round((r.viewed.length / r.total) * 100)
+                                const currentMod = r.resource.modules[r.viewed.length] || r.resource.modules[r.total - 1]
+                                return (
+                                  <div key={r.resource.id} className="min-w-full flex-shrink-0">
+                                    <div className="module-card p-5 flex flex-col h-full">
+                                      <div className="flex-1">
+                                        <div className="flex items-start justify-between mb-3">
+                                          <div className="flex-1">
+                                            <div className="flex items-center gap-2 mb-1">
+                                              <h4 className="font-semibold text-gray-800 text-lg">{r.resource.title}</h4>
+                                              <span className={`text-sm font-medium ${c.labelColor} ${c.bg} px-2.5 py-0.5 rounded`}>{pct}%</span>
+                                            </div>
+                                            <p className="text-base text-gray-400">{t("Current:")} {currentMod?.name || `Module ${r.viewed.length + 1}`}</p>
+                                          </div>
+                                        </div>
+                                        <div className="progress-bar mb-4 h-2.5">
+                                          <div className={`progress-fill ${c.color}`} style={{ width: `${pct}%` }} />
+                                        </div>
                                       </div>
-                                      <p className="text-base text-gray-400">{t("Current:")} {currentMod?.name || `Module ${r.viewed.length + 1}`}</p>
+                                      <button onClick={() => {
+                                        const idx = firstUnviewedIdx(r)
+                                        setViewContent({ resource: r.resource, moduleIdx: idx })
+                                        goTo("modules")
+                                      }} className="w-full py-2.5 bg-navy-400 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 hover:bg-navy-500 transition">
+                                        {t("Continue Lesson")} <i className="fas fa-arrow-right text-xs" />
+                                      </button>
                                     </div>
                                   </div>
-                                  <div className="progress-bar mb-4 h-2.5">
-                                    <div className={`progress-fill ${c.color}`} style={{ width: `${pct}%` }} />
-                                  </div>
-                                </div>
-                                <button onClick={() => {
-                                  const idx = firstUnviewedIdx(r)
-                                  setViewContent({ resource: r.resource, moduleIdx: idx })
-                                  goTo("modules")
-                                }} className="w-full py-2.5 bg-navy-400 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 hover:bg-navy-500 transition">
-                                  {t("Continue Lesson")} <i className="fas fa-arrow-right text-xs" />
-                                </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                          {activeRes.length > 1 && (
+                            <div className="flex items-center justify-between mt-3">
+                              <button onClick={() => setActiveCarouselIdx(Math.max(0, activeCarouselIdx - 1))}
+                                disabled={activeCarouselIdx === 0}
+                                className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition shadow-sm">
+                                <i className="fas fa-chevron-left text-xs text-gray-600" />
+                              </button>
+                              <div className="flex items-center gap-1.5">
+                                {activeRes.map((_, i) => (
+                                  <button key={i} onClick={() => setActiveCarouselIdx(i)}
+                                    className={`rounded-full transition-all duration-300 ${i === activeCarouselIdx ? "w-5 h-2 bg-navy-500" : "w-2 h-2 bg-gray-300 hover:bg-gray-400"}`} />
+                                ))}
                               </div>
-                            )
-                          })}
+                              <button onClick={() => setActiveCarouselIdx(Math.min(activeRes.length - 1, activeCarouselIdx + 1))}
+                                disabled={activeCarouselIdx === activeRes.length - 1}
+                                className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition shadow-sm">
+                                <i className="fas fa-chevron-right text-xs text-gray-600" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -640,8 +672,8 @@ export default function Student() {
                   return (
                     <div className="flex flex-col">
                       <h3 className="text-lg font-bold text-gray-800 mb-4">{t("Upcoming Deadlines")}</h3>
-                      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm flex flex-col" style={{ flex: deadlinesExpanded ? "1" : undefined }}>
-                        <div className="space-y-0" style={{ flex: deadlinesExpanded ? "1" : undefined }}>
+                      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm flex flex-col" style={{ maxHeight: "380px", overflowY: "auto" }}>
+                        <div className="space-y-0">
                           {allDeadlines.length === 0 ? (
                             <div className="text-center py-8">
                               <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-2">
