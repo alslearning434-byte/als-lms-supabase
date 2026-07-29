@@ -61,6 +61,9 @@ export default function Student() {
   const [accelMsg, setAccelMsg] = useState<string | null>(null)
   const [leaderboardData, setLeaderboardData] = useState<{ classRanks: LeaderboardEntry[]; batchRanks: LeaderboardEntry[] }>({ classRanks: [], batchRanks: [] })
   const [leaderboardLoading, setLeaderboardLoading] = useState(true)
+  const [classPage, setClassPage] = useState(1)
+  const [batchPage, setBatchPage] = useState(1)
+  const PER_PAGE = 20
 
   const t = (text: string): string => {
     if (language !== "tl") return text
@@ -1578,71 +1581,113 @@ export default function Student() {
                       </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                        <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                          <i className="fas fa-trophy text-amber-500 text-sm" /> {t("Class Leaderboard")}
-                        </h3>
-                        {leaderboardLoading ? (
-                          <div className="flex items-center justify-center py-8">
-                            <div className="w-6 h-6 border-2 border-navy-500 border-t-transparent rounded-full animate-spin" />
-                          </div>
-                        ) : leaderboardData.classRanks.length === 0 ? (
-                          <div className="text-center py-6">
-                            <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-2">
-                              <i className="fas fa-users text-gray-300 text-lg" />
-                            </div>
-                            <p className="text-xs text-gray-400">{t("No other students in your class yet")}</p>
-                          </div>
-                        ) : (
-                          leaderboardData.classRanks.map((s) => (
-                            <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? "bg-amber-50 border border-amber-200" : "hover:bg-gray-50"}`}>
-                              <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center`}>{s.rank}</span>
-                              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold">{s.initials}</div>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-1.5">
-                                  <p className="text-sm font-medium text-gray-800">{s.name}</p>
-                                  {s.highlight && <span className="text-[9px] font-medium text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">You</span>}
-                                </div>
-                                <p className="text-xs text-gray-400">{s.section}</p>
+                      {(() => {
+                        const renderPagination = (total: number, page: number, setPage: (p: number) => void) => {
+                          const totalPages = Math.ceil(total / PER_PAGE)
+                          if (totalPages <= 1) return null
+                          return (
+                            <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
+                              <button disabled={page <= 1} onClick={() => setPage(page - 1)}
+                                className="w-7 h-7 rounded flex items-center justify-center text-xs text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition">
+                                <i className="fas fa-chevron-left" />
+                              </button>
+                              <div className="flex items-center gap-1">
+                                {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                                  <button key={p} onClick={() => setPage(p)}
+                                    className={`min-w-[28px] h-7 rounded text-xs font-medium transition ${p === page ? "bg-navy-500 text-white" : "text-gray-500 hover:bg-gray-100"}`}>
+                                    {p}
+                                  </button>
+                                ))}
                               </div>
-                              <span className={`text-sm font-semibold ${s.scoreColor}`}>{s.score}</span>
+                              <button disabled={page >= totalPages} onClick={() => setPage(page + 1)}
+                                className="w-7 h-7 rounded flex items-center justify-center text-xs text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition">
+                                <i className="fas fa-chevron-right" />
+                              </button>
                             </div>
-                          ))
-                        )}
-                      </div>
+                          )
+                        }
 
-                      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                        <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                          <i className="fas fa-globe text-navy-500 text-sm" /> {t("Batch Leaderboard")}
-                        </h3>
-                        {leaderboardLoading ? (
-                          <div className="flex items-center justify-center py-8">
-                            <div className="w-6 h-6 border-2 border-navy-500 border-t-transparent rounded-full animate-spin" />
-                          </div>
-                        ) : leaderboardData.batchRanks.length === 0 ? (
-                          <div className="text-center py-6">
-                            <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-2">
-                              <i className="fas fa-users text-gray-300 text-lg" />
-                            </div>
-                            <p className="text-xs text-gray-400">{t("No other students enrolled yet")}</p>
-                          </div>
-                        ) : (
-                          leaderboardData.batchRanks.map((s) => (
-                            <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? "bg-amber-50 border border-amber-200" : "hover:bg-gray-50"}`}>
-                              <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center`}>{s.rank}</span>
-                              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold">{s.initials}</div>
+                        const classTotal = leaderboardData.classRanks.length
+                        const classSlice = leaderboardData.classRanks.slice((classPage - 1) * PER_PAGE, classPage * PER_PAGE)
+                        const batchTotal = leaderboardData.batchRanks.length
+                        const batchSlice = leaderboardData.batchRanks.slice((batchPage - 1) * PER_PAGE, batchPage * PER_PAGE)
+
+                        return (
+                          <>
+                            <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm flex flex-col">
+                              <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                                <i className="fas fa-trophy text-amber-500 text-sm" /> {t("Class Leaderboard")}
+                              </h3>
                               <div className="flex-1">
-                                <div className="flex items-center gap-1.5">
-                                  <p className="text-sm font-medium text-gray-800">{s.name}</p>
-                                  {s.highlight && <span className="text-[9px] font-medium text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">You</span>}
-                                </div>
-                                <p className="text-xs text-gray-400">{s.section}</p>
+                                {leaderboardLoading ? (
+                                  <div className="flex items-center justify-center py-8">
+                                    <div className="w-6 h-6 border-2 border-navy-500 border-t-transparent rounded-full animate-spin" />
+                                  </div>
+                                ) : classTotal === 0 ? (
+                                  <div className="text-center py-6">
+                                    <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-2">
+                                      <i className="fas fa-users text-gray-300 text-lg" />
+                                    </div>
+                                    <p className="text-xs text-gray-400">{t("No other students in your class yet")}</p>
+                                  </div>
+                                ) : (
+                                  classSlice.map((s) => (
+                                    <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? "bg-amber-50 border border-amber-200" : "hover:bg-gray-50"}`}>
+                                      <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center shrink-0`}>{s.rank}</span>
+                                      <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold shrink-0">{s.initials}</div>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                          <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
+                                          {s.highlight && <span className="text-[9px] font-medium text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full shrink-0">You</span>}
+                                        </div>
+                                        <p className="text-xs text-gray-400 truncate">{s.section}</p>
+                                      </div>
+                                      <span className={`text-sm font-semibold shrink-0 ${s.scoreColor}`}>{s.score}</span>
+                                    </div>
+                                  ))
+                                )}
                               </div>
-                              <span className="text-sm font-semibold text-green-600">{s.score}</span>
+                              {renderPagination(classTotal, classPage, setClassPage)}
                             </div>
-                          ))
-                        )}
-                      </div>
+
+                            <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm flex flex-col">
+                              <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                                <i className="fas fa-globe text-navy-500 text-sm" /> {t("Batch Leaderboard")}
+                              </h3>
+                              <div className="flex-1">
+                                {leaderboardLoading ? (
+                                  <div className="flex items-center justify-center py-8">
+                                    <div className="w-6 h-6 border-2 border-navy-500 border-t-transparent rounded-full animate-spin" />
+                                  </div>
+                                ) : batchTotal === 0 ? (
+                                  <div className="text-center py-6">
+                                    <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-2">
+                                      <i className="fas fa-users text-gray-300 text-lg" />
+                                    </div>
+                                    <p className="text-xs text-gray-400">{t("No other students enrolled yet")}</p>
+                                  </div>
+                                ) : (
+                                  batchSlice.map((s) => (
+                                    <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? "bg-amber-50 border border-amber-200" : "hover:bg-gray-50"}`}>
+                                      <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center shrink-0`}>{s.rank}</span>
+                                      <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold shrink-0">{s.initials}</div>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                          <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
+                                          {s.highlight && <span className="text-[9px] font-medium text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full shrink-0">You</span>}
+                                        </div>
+                                        <p className="text-xs text-gray-400 truncate">{s.section}</p>
+                                      </div>
+                                      <span className="text-sm font-semibold text-green-600 shrink-0">{s.score}</span>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                              {renderPagination(batchTotal, batchPage, setBatchPage)}
+                            </div>
+                          </>
+                        )
+                      })()}
                     </div>
                   </>
                 )
