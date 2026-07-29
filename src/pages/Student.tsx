@@ -63,7 +63,7 @@ export default function Student() {
   const [leaderboardLoading, setLeaderboardLoading] = useState(true)
   const [classPage, setClassPage] = useState(1)
   const [batchPage, setBatchPage] = useState(1)
-  const PER_PAGE = 20
+  const PER_PAGE = 5
 
   const t = (text: string): string => {
     if (language !== "tl") return text
@@ -441,6 +441,8 @@ export default function Student() {
   }
 
   const onQuizComplete = (resource: Resource, moduleIdx: number, result: { score: number; total: number; passed: boolean }) => {
+    const key = `${resource.id}_${moduleIdx}`
+    setQuizSubmissions(prev => ({ ...prev, [key]: result }))
     const mod = resource.modules?.[moduleIdx]
     const rules = mod?.adaptiveRules
     if (!rules) return
@@ -1554,14 +1556,17 @@ export default function Student() {
                               const gradient = gradients[i % gradients.length]
                               return (
                                 <div key={r.id} className="group relative rounded-xl border border-gray-200/60 bg-white shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
-                                  style={{ animation: `badgePop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) ${i * 0.06}s both` }}>
+                                  style={{ animation: `fadeIn 0.4s ease-out ${i * 0.05}s both` }}>
                                   <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none">
                                     <div className="absolute inset-0 bg-gradient-to-b from-white/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                                     <div className="absolute -inset-full top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-700 ease-in-out" />
                                   </div>
                                   <div className="relative p-4 flex flex-col items-center text-center">
-                                    <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-lg shadow-black/10 ring-2 ring-white/50 mb-3 group-hover:scale-110 group-hover:shadow-xl group-hover:shadow-black/20 transition-all duration-300`}>
-                                      <span className="text-2xl drop-shadow-sm">{badge}</span>
+                                    <div className="relative"
+                                      style={{ animation: `badgePop 0.5s cubic-bezier(0.34,1.56,0.64,1) ${i * 0.05 + 0.15}s both` }}>
+                                      <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-lg shadow-black/10 ring-2 ring-white/50 mb-3 group-hover:scale-110 group-hover:shadow-xl group-hover:shadow-black/20 transition-all duration-300`}>
+                                        <span className="text-2xl drop-shadow-sm">{badge}</span>
+                                      </div>
                                     </div>
                                     <div className={`w-8 h-8 rounded-full ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center text-xs ring-2 ring-white absolute top-2 right-2 shadow-sm`}>
                                       <i className={`fas ${subjIcon.icon}`} />
