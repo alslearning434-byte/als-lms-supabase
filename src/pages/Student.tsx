@@ -52,6 +52,8 @@ export default function Student() {
   const [expandedCard, setExpandedCard] = useState<string | null>(null)
   const [congratsTarget, setCongratsTarget] = useState<{ resourceId: string; moduleIdx: number } | null>(null)
   const [activeModuleTask, setActiveModuleTask] = useState<{ resource: Resource; moduleIdx: number; task: ModuleTask } | null>(null)
+  const [remediationTarget, setRemediationTarget] = useState<{ resource: Resource; moduleIdx: number } | null>(null)
+  const [accelMsg, setAccelMsg] = useState<string | null>(null)
 
   const t = (text: string): string => {
     if (language !== "tl") return text
@@ -351,6 +353,31 @@ export default function Student() {
     } catch { /* offline */ }
   }
 
+  const onQuizComplete = (resource: Resource, moduleIdx: number, result: { score: number; total: number; passed: boolean }) => {
+    const mod = resource.modules?.[moduleIdx]
+    const rules = mod?.adaptiveRules
+    if (!rules) return
+    const pct = (result.score / result.total) * 100
+
+    // Remediation: if score below minScore and remediation is enabled, redirect
+    if (!result.passed && rules.remediation.enabled) {
+      const targetIdx = rules.remediation.moduleIdx
+      if (targetIdx >= 0 && targetIdx < (resource.modules?.length || 0) && targetIdx !== moduleIdx) {
+        setRemediationTarget({ resource, moduleIdx: targetIdx })
+      }
+    }
+
+    // Acceleration (post-quiz mode): if score >= threshold, auto-mark next module
+    if (rules.acceleration.enabled && rules.acceleration.mode === "postquiz" && pct >= rules.acceleration.threshold) {
+      const nextIdx = moduleIdx + 1
+      if (nextIdx < (resource.modules?.length || 0)) {
+        markModuleViewed(resource.id, nextIdx)
+        setAccelMsg(`Great work! You scored ${Math.round(pct)}% — Module ${nextIdx + 1} has been unlocked.`)
+        setTimeout(() => setAccelMsg(null), 4000)
+      }
+    }
+  }
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar title="ALS Learning" subtitle={t("Student Portal")} items={navItems} activePage={activePage} onNavigate={goTo} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
@@ -561,6 +588,57 @@ export default function Student() {
                   </div>
                 </div>
               </div>
+
+              {/* Recommended for You */}
+              {(() => {
+                const recommendations: { resourceId: string; moduleIdx: number; score: number; moduleName: string; resourceName: string }[] = []
+                Object.entries(quizSubmissions).forEach(([key, sub]) => {
+                  const [resId, modIdxStr] = key.split("_")
+                  const modIdx = Number(modIdxStr)
+                  const res = resources.find(r => r.id === resId)
+                  if (!res || !res.modules?.[modIdx]) return
+                  const pct = (sub.score / sub.total) * 100
+                  if (pct < 50) {
+                    recommendations.push({
+                      resourceId: resId,
+                      moduleIdx: modIdx,
+                      score: Math.round(pct),
+                      moduleName: res.modules[modIdx].name || `Module ${modIdx + 1}`,
+                      resourceName: res.title,
+                    })
+                  }
+                })
+                if (recommendations.length === 0) return null
+                return (
+                  <div className="mt-6">
+                    <h3 className="text-base font-bold text-gray-800 mb-3"><i className="fas fa-lightbulb text-amber-500 mr-2" />Recommended for You</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {recommendations.slice(0, 4).map((rec, i) => (
+                        <div key={i} className="p-4 rounded-xl border border-amber-200 bg-amber-50/50 hover:shadow-sm transition cursor-pointer"
+                          onClick={() => {
+                            const res = resources.find(r => r.id === rec.resourceId)
+                            if (res) goTo("modules")
+                            setModalResource(res || null)
+                          }}>
+                          <div className="flex items-start gap-3">
+                            <div className="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+                              <i className="fas fa-book-open text-amber-500 text-sm" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-800 truncate">{rec.moduleName}</p>
+                              <p className="text-xs text-gray-500 truncate">{rec.resourceName}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-600">{rec.score}%</span>
+                                <span className="text-[10px] text-gray-400">Needs review</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           )}
 
@@ -569,7 +647,7 @@ export default function Student() {
             <div>
               <h2 className="text-2xl font-bold text-gray-800">{t("My Modules")}</h2>
               <p className="text-gray-500 mt-1 mb-6">{t("Access your learning materials and lessons")}</p>
-              <ModuleModal resource={modalResource} viewedModules={modalResource ? (progressMap[modalResource.id] || []) : []} onClose={() => setModalResource(null)} onViewContent={(r, idx) => { setModalResource(null); setViewContent({ resource: r, moduleIdx: idx }) }} onToggleUnread={(resourceId, moduleIdx) => markModuleUnread(resourceId, moduleIdx)} t={t} />
+              <ModuleModal resource={modalResource} viewedModules={modalResource ? (progressMap[modalResource.id] || []) : []} quizSubmissions={quizSubmissions} onClose={() => setModalResource(null)} onViewContent={(r, idx) => { setModalResource(null); setViewContent({ resource: r, moduleIdx: idx }) }} onToggleUnread={(resourceId, moduleIdx) => markModuleUnread(resourceId, moduleIdx)} t={t} />
               <ModuleViewer data={viewContent} viewedModules={viewContent ? (progressMap[viewContent.resource.id] || []) : []} onBack={() => { setViewContent(null) }} onNavigate={(idx) => { setViewContent(prev => prev ? { ...prev, moduleIdx: idx } : null) }} onMarkViewed={(resourceId, moduleIdx) => markModuleViewed(resourceId, moduleIdx)} onGoToProgress={(resourceId, moduleIdx) => { setViewContent(null); setCongratsTarget({ resourceId, moduleIdx }); setActivePage("finish-modules") }} user={user} t={t} />
               {resources.length === 0 ? (
                 <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
@@ -1435,6 +1513,8 @@ export default function Student() {
           const quizSub = quizSubmissions[`${r.id}_${moduleIdx}`]
           if (quizSub) {
             const pct = Math.round((quizSub.score / quizSub.total) * 100)
+            const mod = r.modules?.[moduleIdx]
+            const canRetake = !quizSub.passed && (mod?.adaptiveRules?.prerequisite?.enabled || mod?.adaptiveRules?.remediation?.enabled)
             return (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setActiveModuleTask(null)}>
                 <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
@@ -1462,10 +1542,18 @@ export default function Student() {
                         <p className="text-[10px] text-gray-400 uppercase tracking-wide">Score</p>
                       </div>
                     </div>
-                    <button onClick={() => setActiveModuleTask(null)}
-                      className="w-full py-2.5 bg-gray-100 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-200 transition">
-                      Close
-                    </button>
+                    <div className="flex gap-2">
+                      {canRetake && (
+                        <button onClick={() => setActiveModuleTask({ resource: r, moduleIdx, task })}
+                          className="flex-1 py-2.5 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition">
+                          <i className="fas fa-redo mr-1" />Retry
+                        </button>
+                      )}
+                      <button onClick={() => setActiveModuleTask(null)}
+                        className={`${canRetake ? "flex-1" : "w-full"} py-2.5 bg-gray-100 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-200 transition`}>
+                        Close
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1481,6 +1569,8 @@ export default function Student() {
               onClose={() => setActiveModuleTask(null)}
               context="quiz"
               moduleIdx={moduleIdx}
+              allowRetake={!!(r.modules?.[moduleIdx]?.adaptiveRules?.prerequisite?.enabled || r.modules?.[moduleIdx]?.adaptiveRules?.remediation?.enabled)}
+              onComplete={(result) => onQuizComplete(r, moduleIdx, result)}
             />
           )
         }
@@ -1640,9 +1730,10 @@ function ModuleCard({ title, subtitle, icon, color, lessonsText, pct, btnText, s
   )
 }
 
-function ModuleModal({ resource, viewedModules, onClose, onViewContent, onToggleUnread, t }: {
+function ModuleModal({ resource, viewedModules, quizSubmissions, onClose, onViewContent, onToggleUnread, t }: {
   resource: Resource | null
   viewedModules: number[]
+  quizSubmissions: Record<string, { score: number; total: number; passed: boolean }>
   onClose: () => void
   onViewContent: (resource: Resource, moduleIdx: number) => void
   onToggleUnread: (resourceId: string, moduleIdx: number) => void
@@ -1719,7 +1810,17 @@ function ModuleModal({ resource, viewedModules, onClose, onViewContent, onToggle
                 const blockCount = m.blocks?.length || 0
                 const hasContent = blockCount > 0
                 const isViewed = viewedModules.includes(i)
-                const isLocked = !isViewed && i > 0 && !viewedModules.includes(i - 1)
+                const prevMod = i > 0 ? mods[i - 1] : null
+                const prevRules = prevMod?.adaptiveRules
+                const prvEnabled = prevRules?.prerequisite?.enabled && prevMod?.tasks?.some(t => t.type === "quiz")
+                const prvKey = prvEnabled ? `${resource.id}_${i - 1}` : null
+                const prvSub = prvKey ? quizSubmissions[prvKey] : null
+                const prvScore = prvSub ? (prvSub.score / prvSub.total) * 100 : 0
+                const prvFailed = prvEnabled ? !prvSub || prvScore < prevRules!.prerequisite.minScore : false
+                const seqLocked = !isViewed && i > 0 && !viewedModules.includes(i - 1)
+                const prereqLocked = !isViewed && i > 0 && !seqLocked && prvFailed
+                const isLocked = seqLocked || prereqLocked
+                const lockReason = prereqLocked ? `Score ${Math.round(prvScore)}% — need ${prevRules!.prerequisite.minScore}% on "${prevMod!.name || `Module ${i}`}" quiz` : null
                 return (
                   <button
                     key={i}
@@ -1734,9 +1835,14 @@ function ModuleModal({ resource, viewedModules, onClose, onViewContent, onToggle
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className={`text-sm font-semibold truncate transition ${isLocked ? "text-gray-400" : "text-gray-800 group-hover:text-navy-600"}`}>{m.name || `Module ${i + 1}`}</span>
-                          {isLocked && (
+                          {isLocked && !prereqLocked && (
                             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 shrink-0">
                               <i className="fas fa-lock mr-0.5" />Locked
+                            </span>
+                          )}
+                          {prereqLocked && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 shrink-0" title={lockReason || ""}>
+                              <i className="fas fa-exclamation-triangle mr-0.5" />Prerequisite
                             </span>
                           )}
                           {isViewed && (
@@ -1829,11 +1935,7 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
     setConfirmNav(null)
     if (data && !viewedModules.includes(data.moduleIdx)) {
       onMarkViewed(data.resource.id, data.moduleIdx)
-      if (navTarget === "back") {
-        onBack()
-      } else {
-        setCongratsState({ resourceId: data.resource.id, moduleIdx: data.moduleIdx, moduleName: mod.name || `Module ${data.moduleIdx + 1}` })
-      }
+      setCongratsState({ resourceId: data.resource.id, moduleIdx: data.moduleIdx, moduleName: mod.name || `Module ${data.moduleIdx + 1}` })
     } else {
       if (data) onMarkViewed(data.resource.id, data.moduleIdx)
       if (navTarget !== null) {
@@ -2121,10 +2223,17 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
             {/* Actions */}
             <div className="px-6 py-5">
               <div className="flex flex-col gap-2.5">
-                <button onClick={handleConfirmMarkRead}
-                  className="w-full py-3 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center justify-center gap-2 shadow-sm shadow-navy-500/20">
-                  <i className="fas fa-check-circle text-xs" /> {viewedModules.includes(data.moduleIdx) ? "Continue" : "Complete & Continue"}
-                </button>
+                {confirmNav?.target === "back" ? (
+                  <button onClick={handleConfirmMarkRead}
+                    className="w-full py-3 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center justify-center gap-2 shadow-sm shadow-navy-500/20">
+                    <i className="fas fa-check-circle text-xs" /> Mark as Complete & Leave
+                  </button>
+                ) : (
+                  <button onClick={handleConfirmMarkRead}
+                    className="w-full py-3 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center justify-center gap-2 shadow-sm shadow-navy-500/20">
+                    <i className="fas fa-check-circle text-xs" /> {viewedModules.includes(data.moduleIdx) ? "Continue" : "Complete & Continue"}
+                  </button>
+                )}
                 {confirmNav?.target === "back" && (
                   <button onClick={handleConfirmGoBackUnread}
                     className="w-full py-3 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition flex items-center justify-center gap-2">
@@ -2265,6 +2374,55 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
           )}
         </div>
       </div>
+
+      {/* Remediation Modal */}
+      {remediationTarget && (() => {
+        const { resource: res, moduleIdx: targetIdx } = remediationTarget
+        const targetMod = res.modules?.[targetIdx]
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setRemediationTarget(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="px-6 py-8 text-center bg-amber-50">
+                <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+                  <i className="fas fa-book-open text-amber-500 text-2xl" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-800 mb-1">Review Recommended</h3>
+                <p className="text-sm text-gray-500">Let's review the material before retrying the quiz.</p>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                <p className="text-sm text-gray-600">
+                  You'll be routed to <strong>{targetMod?.name || `Module ${targetIdx + 1}`}</strong> for review.
+                  After reviewing, you can retake the quiz.
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={() => setRemediationTarget(null)} className="flex-1 py-2.5 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition">
+                    Cancel
+                  </button>
+                  <button onClick={() => {
+                    const target = remediationTarget
+                    setRemediationTarget(null)
+                    setActiveModuleTask(null)
+                    setViewContent({ resource: target.resource, moduleIdx: target.moduleIdx })
+                  }} className="flex-1 py-2.5 bg-amber-500 text-white text-sm font-semibold rounded-xl hover:bg-amber-600 transition">
+                    <i className="fas fa-arrow-right mr-1" /> Go to Review
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Acceleration Toast */}
+      {accelMsg && (
+        <div className="fixed bottom-6 right-6 z-50 bg-green-500 text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-3 animate-slide-up">
+          <i className="fas fa-rocket text-sm" />
+          <span className="text-sm font-medium">{accelMsg}</span>
+          <button onClick={() => setAccelMsg(null)} className="text-white/70 hover:text-white ml-2">
+            <i className="fas fa-times text-xs" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }

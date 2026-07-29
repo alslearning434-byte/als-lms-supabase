@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import TiptapEditor from "./TiptapEditor"
 import TaskBuilder from "./TaskBuilder"
-import type { ModuleContent, ModuleBlock, BlockType } from "../types"
+import type { ModuleContent, ModuleBlock, BlockType, AdaptiveRules } from "../types"
 
 interface BlockEditorProps {
   module: ModuleContent
@@ -35,6 +35,11 @@ const blockTypeConfig: Record<string, { label: string; icon: string; color: stri
 export default function BlockEditor({ module, index, moduleCount, onChange, onRemove, isDark, subject, isActive, activeContentId }: BlockEditorProps) {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; blockIdx: number } | null>(null)
   const ctxMenuRef = useRef<HTMLDivElement>(null)
+  const [adaptiveExpanded, setAdaptiveExpanded] = useState(false)
+
+  const updateAdaptiveRules = (partial: Partial<AdaptiveRules>) => {
+    onChange({ ...module, adaptiveRules: { ...module.adaptiveRules! , ...partial } })
+  }
 
   useEffect(() => {
     if (!ctxMenu) return
@@ -199,6 +204,122 @@ export default function BlockEditor({ module, index, moduleCount, onChange, onRe
           moduleData={{ name: module.name, description: module.description, blocks: module.blocks, subject: subject || "" }}
           activeContentId={activeContentId}
         />
+      </div>
+
+      {/* Adaptive Rules Section */}
+      <div className={`rounded-lg border overflow-hidden ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+        <button onClick={() => setAdaptiveExpanded(!adaptiveExpanded)}
+          className={`w-full flex items-center justify-between px-3 py-2.5 text-xs font-semibold transition ${isDark ? "text-gray-400 hover:bg-gray-700/50" : "text-gray-500 hover:bg-gray-100"}`}>
+          <span><i className="fas fa-bolt mr-1.5" />Adaptive Learning</span>
+          <i className={`fas fa-chevron-down text-[10px] transition-transform ${adaptiveExpanded ? "rotate-180" : ""}`} />
+        </button>
+        {adaptiveExpanded && (
+          <div className={`px-3 pb-3 space-y-3 ${isDark ? "bg-gray-900/30" : "bg-gray-50/50"}`}>
+            {/* Prerequisite */}
+            <div>
+              <label className="flex items-center justify-between mb-1.5">
+                <span className={`text-[11px] font-medium ${isDark ? "text-gray-400" : "text-gray-500"}`}>Prerequisite — require passing quiz to unlock next module</span>
+                <button onClick={() => updateAdaptiveRules({ prerequisite: { ...module.adaptiveRules!.prerequisite, enabled: !module.adaptiveRules!.prerequisite.enabled } })}
+                  className={`relative w-8 h-4 rounded-full transition-colors ${module.adaptiveRules!.prerequisite.enabled ? "bg-navy-500" : isDark ? "bg-gray-600" : "bg-gray-300"}`}>
+                  <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${module.adaptiveRules!.prerequisite.enabled ? "translate-x-4" : ""}`} />
+                </button>
+              </label>
+              {module.adaptiveRules!.prerequisite.enabled && (
+                <div className="space-y-2 ml-2">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[10px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>Min score: {module.adaptiveRules!.prerequisite.minScore}%</span>
+                  </div>
+                  <input type="range" min="0" max="100" value={module.adaptiveRules!.prerequisite.minScore}
+                    onChange={(e) => updateAdaptiveRules({ prerequisite: { ...module.adaptiveRules!.prerequisite, minScore: Number(e.target.value) } })}
+                    className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-navy-500" />
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[10px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>Max attempts</span>
+                    <input type="number" min="0" max="10" value={module.adaptiveRules!.prerequisite.maxAttempts}
+                      onChange={(e) => updateAdaptiveRules({ prerequisite: { ...module.adaptiveRules!.prerequisite, maxAttempts: Math.max(0, Number(e.target.value)) } })}
+                      className={`w-16 p-1 text-xs text-center rounded border ${isDark ? "bg-gray-800 border-gray-700 text-white" : "border-gray-200 text-gray-700"}"`} />
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Remediation */}
+            <div className={`border-t pt-2 ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+              <label className="flex items-center justify-between mb-1.5">
+                <span className={`text-[11px] font-medium ${isDark ? "text-gray-400" : "text-gray-500"}`}>Remediation — redirect to another module on failure</span>
+                <button onClick={() => updateAdaptiveRules({ remediation: { ...module.adaptiveRules!.remediation, enabled: !module.adaptiveRules!.remediation.enabled } })}
+                  className={`relative w-8 h-4 rounded-full transition-colors ${module.adaptiveRules!.remediation.enabled ? "bg-navy-500" : isDark ? "bg-gray-600" : "bg-gray-300"}`}>
+                  <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${module.adaptiveRules!.remediation.enabled ? "translate-x-4" : ""}`} />
+                </button>
+              </label>
+              {module.adaptiveRules!.remediation.enabled && (
+                <div className="ml-2">
+                  <select value={module.adaptiveRules!.remediation.moduleIdx}
+                    onChange={(e) => updateAdaptiveRules({ remediation: { ...module.adaptiveRules!.remediation, moduleIdx: Number(e.target.value) } })}
+                    className={`w-full p-1.5 text-xs rounded border ${isDark ? "bg-gray-800 border-gray-700 text-white" : "border-gray-200 text-gray-700"}`}>
+                    {Array.from({ length: moduleCount }, (_, i) => (
+                      <option key={i} value={i} disabled={i === index}>Module {i + 1}{i === index ? " (current)" : ""}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            {/* Acceleration */}
+            <div className={`border-t pt-2 ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+              <label className="flex items-center justify-between mb-1.5">
+                <span className={`text-[11px] font-medium ${isDark ? "text-gray-400" : "text-gray-500"}`}>Acceleration — skip content when mastery is demonstrated</span>
+                <button onClick={() => updateAdaptiveRules({ acceleration: { ...module.adaptiveRules!.acceleration, enabled: !module.adaptiveRules!.acceleration.enabled } })}
+                  className={`relative w-8 h-4 rounded-full transition-colors ${module.adaptiveRules!.acceleration.enabled ? "bg-navy-500" : isDark ? "bg-gray-600" : "bg-gray-300"}`}>
+                  <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${module.adaptiveRules!.acceleration.enabled ? "translate-x-4" : ""}`} />
+                </button>
+              </label>
+              {module.adaptiveRules!.acceleration.enabled && (
+                <div className="space-y-2 ml-2">
+                  <div className="flex gap-2">
+                    {(["pretest", "postquiz"] as const).map((mode) => (
+                      <button key={mode} onClick={() => updateAdaptiveRules({ acceleration: { ...module.adaptiveRules!.acceleration, mode } })}
+                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-semibold border transition ${
+                          module.adaptiveRules!.acceleration.mode === mode
+                            ? "bg-navy-500 text-white border-navy-500"
+                            : isDark ? "border-gray-600 text-gray-400 hover:border-gray-500" : "border-gray-200 text-gray-500 hover:border-gray-300"
+                        }`}>
+                        {mode === "pretest" ? "Pre-test" : "Post-quiz"}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[10px] ${isDark ? "text-gray-500" : "text-gray-400"}`}>Threshold: {module.adaptiveRules!.acceleration.threshold}%</span>
+                  </div>
+                  <input type="range" min="0" max="100" value={module.adaptiveRules!.acceleration.threshold}
+                    onChange={(e) => updateAdaptiveRules({ acceleration: { ...module.adaptiveRules!.acceleration, threshold: Number(e.target.value) } })}
+                    className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-navy-500" />
+                </div>
+              )}
+            </div>
+            {/* Topics */}
+            <div className={`border-t pt-2 ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+              <span className={`text-[11px] font-medium block mb-1.5 ${isDark ? "text-gray-400" : "text-gray-500"}`}>Topics (for recommendations)</span>
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {module.adaptiveRules!.topics.map((topic, i) => (
+                  <span key={i} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${isDark ? "bg-navy-900/50 text-navy-300" : "bg-navy-100 text-navy-700"}`}>
+                    {topic}
+                    <button onClick={() => updateAdaptiveRules({ topics: module.adaptiveRules!.topics.filter((_, j) => j !== i) })}
+                      className="hover:opacity-70"><i className="fas fa-times" /></button>
+                  </span>
+                ))}
+              </div>
+              <input type="text" placeholder="Type a topic and press Enter..."
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const val = (e.target as HTMLInputElement).value.trim()
+                    if (val && !module.adaptiveRules!.topics.includes(val)) {
+                      updateAdaptiveRules({ topics: [...module.adaptiveRules!.topics, val] })
+                    }
+                    (e.target as HTMLInputElement).value = ""
+                  }
+                }}
+                className={`w-full p-1.5 text-xs rounded border ${isDark ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500" : "border-gray-200 text-gray-700 placeholder-gray-400"}`} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Block Context Menu */}

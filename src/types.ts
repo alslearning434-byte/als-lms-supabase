@@ -101,6 +101,31 @@ export interface ModuleContent {
   description: string
   blocks: ModuleBlock[]
   tasks: ModuleTask[]
+  adaptiveRules?: AdaptiveRules
+}
+
+export interface AdaptivePrerequisite {
+  enabled: boolean
+  minScore: number
+  maxAttempts: number
+}
+
+export interface AdaptiveRemediation {
+  enabled: boolean
+  moduleIdx: number
+}
+
+export interface AdaptiveAcceleration {
+  enabled: boolean
+  mode: "pretest" | "postquiz"
+  threshold: number
+}
+
+export interface AdaptiveRules {
+  prerequisite: AdaptivePrerequisite
+  remediation: AdaptiveRemediation
+  acceleration: AdaptiveAcceleration
+  topics: string[]
 }
 
 export interface Resource {

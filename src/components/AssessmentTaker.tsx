@@ -12,9 +12,11 @@ interface Props {
   onClose: () => void
   context?: "quiz" | "assessment"
   moduleIdx?: number
+  allowRetake?: boolean
+  onComplete?: (result: { score: number; total: number; passed: boolean }) => void
 }
 
-export default function AssessmentTaker({ resourceId, assessmentId, assessment, studentId, studentName, onClose, context = "assessment", moduleIdx }: Props) {
+export default function AssessmentTaker({ resourceId, assessmentId, assessment, studentId, studentName, onClose, context = "assessment", moduleIdx, allowRetake = false, onComplete }: Props) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState(false)
   const [score, setScore] = useState<{ score: number; total: number; results: { qId: string; correct: boolean; correctAnswer: string; needsReview: boolean }[] } | null>(null)
@@ -57,6 +59,7 @@ export default function AssessmentTaker({ resourceId, assessmentId, assessment, 
       return { qId: q.id, correct, correctAnswer: getDisplayAnswer(q), needsReview }
     })
     const sc = results.filter((r) => r.correct).length
+    const passed = context === "quiz" ? sc >= results.length * 0.5 : false
     setScore({ score: sc, total: results.length, results })
     setSubmitted(true)
     addDoc(collection(db, "assessmentSubmissions"), {
@@ -77,11 +80,18 @@ export default function AssessmentTaker({ resourceId, assessmentId, assessment, 
         studentName,
         score: sc,
         total: results.length,
-        passed: sc >= results.length * 0.5,
+        passed,
         answers,
         submittedAt: new Date().toISOString(),
       }).catch(() => {})
     }
+    onComplete?.({ score: sc, total: results.length, passed })
+  }
+
+  const handleRetry = () => {
+    setAnswers({})
+    setSubmitted(false)
+    setScore(null)
   }
 
   const autogradable = assessment.questions.filter((q) => q.type !== "Paragraph" && q.type !== "File Upload")
@@ -181,10 +191,17 @@ export default function AssessmentTaker({ resourceId, assessmentId, assessment, 
               )
             })}
 
-            <button onClick={onClose} className="w-full py-3 rounded-xl text-white text-sm font-medium transition"
-              style={{ backgroundColor: accentColor }}>
-              Back to Modules
-            </button>
+            <div className="flex gap-3">
+              {allowRetake && (
+                <button onClick={handleRetry} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
+                  <i className="fas fa-redo mr-1" /> Retry Quiz
+                </button>
+              )}
+              <button onClick={onClose} className={`py-3 rounded-xl text-white text-sm font-medium transition ${allowRetake ? "flex-1" : "w-full"}`}
+                style={{ backgroundColor: accentColor }}>
+                Back to Modules
+              </button>
+            </div>
           </div>
         )}
       </div>

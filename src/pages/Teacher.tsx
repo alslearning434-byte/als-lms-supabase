@@ -33,6 +33,12 @@ export default function Teacher() {
     description: "",
     blocks: [{ id: `blk_${Date.now()}_init`, type: "content", topic: "", description: "" }],
     tasks: [],
+    adaptiveRules: {
+      prerequisite: { enabled: false, minScore: 70, maxAttempts: 3 },
+      remediation: { enabled: false, moduleIdx: 0 },
+      acceleration: { enabled: false, mode: "postquiz", threshold: 90 },
+      topics: [],
+    },
   })
 
   const navigate = useNavigate()
@@ -326,6 +332,12 @@ export default function Teacher() {
             if (t.assessment) clean.assessment = stripUndefined(t.assessment)
             return clean
           }),
+          adaptiveRules: m.adaptiveRules || {
+            prerequisite: { enabled: false, minScore: 70, maxAttempts: 3 },
+            remediation: { enabled: false, moduleIdx: 0 },
+            acceleration: { enabled: false, mode: "postquiz", threshold: 90 },
+            topics: [],
+          },
         }
         return mod
       })
