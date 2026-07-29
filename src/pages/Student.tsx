@@ -1381,38 +1381,68 @@ export default function Student() {
                       </div>
                     </div>
 
-                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm mb-6">
-                      <h3 className="font-semibold text-gray-800 mb-5 flex items-center gap-2">
-                        <i className="fas fa-award text-amber-500 text-sm" /> {t("Badges")} <span className="text-sm font-normal text-gray-400">({completedResources.length} earned)</span>
-                      </h3>
-                      {completedResources.length === 0 ? (
-                        <div className="text-center py-8">
-                          <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-3">
-                            <i className="fas fa-medal text-gray-300 text-xl" />
+                      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm mb-6">
+                        <h3 className="font-semibold text-gray-800 mb-5 flex items-center gap-2">
+                          <i className="fas fa-award text-amber-500 text-sm" /> {t("Badges")} <span className="text-sm font-normal text-gray-400">({completedResources.length} earned)</span>
+                        </h3>
+                        {completedResources.length === 0 ? (
+                          <div className="text-center py-8">
+                            <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-3">
+                              <i className="fas fa-medal text-gray-300 text-xl" />
+                            </div>
+                            <p className="text-sm text-gray-400">{t("Complete a course to earn your first badge")}</p>
                           </div>
-                          <p className="text-sm text-gray-400">{t("Complete a course to earn your first badge")}</p>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                          {completedResources.map((r, i) => {
-                            const badge = getBadge(r.subject)
-                            const pastelColors = [
-                              "bg-yellow-100", "bg-amber-100", "bg-orange-100", "bg-blue-100", "bg-purple-100",
-                              "bg-red-100", "bg-teal-100", "bg-green-100", "bg-pink-100", "bg-cyan-100",
-                              "bg-lime-100", "bg-rose-100", "bg-violet-100", "bg-fuchsia-100", "bg-sky-100",
-                              "bg-emerald-100", "bg-indigo-100", "bg-stone-100", "bg-amber-100", "bg-blue-100",
-                            ]
-                            return (
-                              <div key={r.id} className="flex flex-col items-center text-center p-3 rounded-xl border border-gray-200/50"
-                                style={{ backgroundColor: pastelColors[i % pastelColors.length] }}>
-                                <span className="text-3xl mb-1">{badge}</span>
-                                <p className="text-[10px] font-semibold text-gray-700 leading-tight truncate w-full">{r.title}</p>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
+                        ) : (
+                          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                            {completedResources.map((r, i) => {
+                              const badge = getBadge(r.subject)
+                              const subjIcon = getSubjectIcon(r.subject)
+                              const gradients = [
+                                "from-amber-400 via-orange-400 to-red-400",
+                                "from-blue-400 via-indigo-400 to-purple-400",
+                                "from-emerald-400 via-teal-400 to-cyan-400",
+                                "from-fuchsia-400 via-pink-400 to-rose-400",
+                                "from-violet-400 via-purple-400 to-fuchsia-400",
+                                "from-sky-400 via-blue-400 to-indigo-400",
+                                "from-lime-400 via-green-400 to-emerald-400",
+                                "from-rose-400 via-red-400 to-orange-400",
+                                "from-cyan-400 via-teal-400 to-blue-400",
+                                "from-yellow-400 via-amber-400 to-orange-400",
+                                "from-pink-400 via-rose-400 to-red-400",
+                                "from-teal-400 via-cyan-400 to-sky-400",
+                                "from-orange-400 via-red-400 to-rose-400",
+                                "from-indigo-400 via-violet-400 to-purple-400",
+                                "from-green-400 via-emerald-400 to-teal-400",
+                                "from-purple-400 via-fuchsia-400 to-pink-400",
+                              ]
+                              const gradient = gradients[i % gradients.length]
+                              return (
+                                <div key={r.id} className="group relative rounded-xl border border-gray-200/60 bg-white shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
+                                  style={{ animation: `badgePop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) ${i * 0.06}s both` }}>
+                                  <div className="absolute inset-0 rounded-xl overflow-hidden pointer-events-none">
+                                    <div className="absolute inset-0 bg-gradient-to-b from-white/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                                    <div className="absolute -inset-full top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-700 ease-in-out" />
+                                  </div>
+                                  <div className="relative p-4 flex flex-col items-center text-center">
+                                    <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-lg shadow-black/10 ring-2 ring-white/50 mb-3 group-hover:scale-110 group-hover:shadow-xl group-hover:shadow-black/20 transition-all duration-300`}>
+                                      <span className="text-2xl drop-shadow-sm">{badge}</span>
+                                    </div>
+                                    <div className={`w-8 h-8 rounded-full ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center text-xs ring-2 ring-white absolute top-2 right-2 shadow-sm`}>
+                                      <i className={`fas ${subjIcon.icon}`} />
+                                    </div>
+                                    <p className="text-[11px] font-semibold text-gray-700 leading-tight truncate w-full">{r.title}</p>
+                                    <div className="flex items-center gap-1 mt-2">
+                                      <span className="text-[9px] font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                                        <i className="fas fa-star text-[7px]" /> Completed
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                       <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
