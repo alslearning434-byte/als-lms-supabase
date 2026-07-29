@@ -918,8 +918,57 @@ export default function Student() {
                                       )
                                     ) : (
                                       <i className="fas fa-lock text-gray-300 text-xs shrink-0" />
-                                    )}
-                                  </div>
+      )}
+
+      {/* Remediation Modal */}
+      {remediationTarget && (() => {
+        const { resource: res, moduleIdx: targetIdx } = remediationTarget
+        const targetMod = res.modules?.[targetIdx]
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setRemediationTarget(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="px-6 py-8 text-center bg-amber-50">
+                <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+                  <i className="fas fa-book-open text-amber-500 text-2xl" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-800 mb-1">Review Recommended</h3>
+                <p className="text-sm text-gray-500">Let's review the material before retrying the quiz.</p>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                <p className="text-sm text-gray-600">
+                  You'll be routed to <strong>{targetMod?.name || `Module ${targetIdx + 1}`}</strong> for review.
+                  After reviewing, you can retake the quiz.
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={() => setRemediationTarget(null)} className="flex-1 py-2.5 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition">
+                    Cancel
+                  </button>
+                  <button onClick={() => {
+                    const target = remediationTarget
+                    setRemediationTarget(null)
+                    setActiveModuleTask(null)
+                    setViewContent({ resource: target.resource, moduleIdx: target.moduleIdx })
+                  }} className="flex-1 py-2.5 bg-amber-500 text-white text-sm font-semibold rounded-xl hover:bg-amber-600 transition">
+                    <i className="fas fa-arrow-right mr-1" /> Go to Review
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Acceleration Toast */}
+      {accelMsg && (
+        <div className="fixed bottom-6 right-6 z-50 bg-green-500 text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-3 animate-slide-up">
+          <i className="fas fa-rocket text-sm" />
+          <span className="text-sm font-medium">{accelMsg}</span>
+          <button onClick={() => setAccelMsg(null)} className="text-white/70 hover:text-white ml-2">
+            <i className="fas fa-times text-xs" />
+          </button>
+        </div>
+      )}
+    </div>
                                 )
                               })}
                             </div>
@@ -2577,55 +2626,6 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
           )}
         </div>
       </div>
-
-      {/* Remediation Modal */}
-      {remediationTarget && (() => {
-        const { resource: res, moduleIdx: targetIdx } = remediationTarget
-        const targetMod = res.modules?.[targetIdx]
-        return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setRemediationTarget(null)}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
-              <div className="px-6 py-8 text-center bg-amber-50">
-                <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
-                  <i className="fas fa-book-open text-amber-500 text-2xl" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-800 mb-1">Review Recommended</h3>
-                <p className="text-sm text-gray-500">Let's review the material before retrying the quiz.</p>
-              </div>
-              <div className="px-6 py-5 space-y-4">
-                <p className="text-sm text-gray-600">
-                  You'll be routed to <strong>{targetMod?.name || `Module ${targetIdx + 1}`}</strong> for review.
-                  After reviewing, you can retake the quiz.
-                </p>
-                <div className="flex gap-2">
-                  <button onClick={() => setRemediationTarget(null)} className="flex-1 py-2.5 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition">
-                    Cancel
-                  </button>
-                  <button onClick={() => {
-                    const target = remediationTarget
-                    setRemediationTarget(null)
-                    setActiveModuleTask(null)
-                    setViewContent({ resource: target.resource, moduleIdx: target.moduleIdx })
-                  }} className="flex-1 py-2.5 bg-amber-500 text-white text-sm font-semibold rounded-xl hover:bg-amber-600 transition">
-                    <i className="fas fa-arrow-right mr-1" /> Go to Review
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* Acceleration Toast */}
-      {accelMsg && (
-        <div className="fixed bottom-6 right-6 z-50 bg-green-500 text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-3 animate-slide-up">
-          <i className="fas fa-rocket text-sm" />
-          <span className="text-sm font-medium">{accelMsg}</span>
-          <button onClick={() => setAccelMsg(null)} className="text-white/70 hover:text-white ml-2">
-            <i className="fas fa-times text-xs" />
-          </button>
-        </div>
-      )}
     </div>
   )
 }
