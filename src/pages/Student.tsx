@@ -9,10 +9,15 @@ import AssessmentTaker from "../components/AssessmentTaker"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
 import { db } from "../firebase"
-import { collection, getDocs, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore"
+import { collection, getDocs, doc, getDoc, setDoc, serverTimestamp, query, where } from "firebase/firestore"
 import type { NavItem, Resource, ModuleTask } from "../types"
 import { getSubjectIcon } from "../utils/subjectIcons"
 import ImageCarousel from "../components/ImageCarousel"
+
+type LeaderboardEntry = {
+  rank: number; initials: string; name: string; section: string
+  score: string; scoreColor: string; highlight: boolean; rankBg: string
+}
 
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "th-large" },
@@ -54,6 +59,8 @@ export default function Student() {
   const [activeModuleTask, setActiveModuleTask] = useState<{ resource: Resource; moduleIdx: number; task: ModuleTask } | null>(null)
   const [remediationTarget, setRemediationTarget] = useState<{ resource: Resource; moduleIdx: number } | null>(null)
   const [accelMsg, setAccelMsg] = useState<string | null>(null)
+  const [leaderboardData, setLeaderboardData] = useState<{ classRanks: LeaderboardEntry[]; batchRanks: LeaderboardEntry[] }>({ classRanks: [], batchRanks: [] })
+  const [leaderboardLoading, setLeaderboardLoading] = useState(true)
 
   const t = (text: string): string => {
     if (language !== "tl") return text
@@ -319,6 +326,83 @@ export default function Student() {
       return () => clearTimeout(timer)
     }
   }, [congratsTarget, activePage])
+
+  useEffect(() => {
+    if (resources.length === 0 || !user) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        setLeaderboardLoading(true)
+        const usersSnap = await getDocs(query(collection(db, "users"), where("role", "==", "student")))
+        const studentMap: Record<string, { displayName: string; gradeLevel: string }> = {}
+        usersSnap.docs.forEach(d => {
+          const data = d.data()
+          studentMap[d.id] = { displayName: data.displayName || "Unknown", gradeLevel: data.gradeLevel || "Section A" }
+        })
+
+        const mpSnap = await getDocs(collection(db, "moduleProgress"))
+        const moduleCounts: Record<string, number> = {}
+        mpSnap.docs.forEach(d => {
+          const data = d.data()
+          const uid = data.userId
+          if (uid) moduleCounts[uid] = (moduleCounts[uid] || 0) + (data.viewedModules?.length || 0)
+        })
+
+        const qSnap = await getDocs(collection(db, "quizSubmissions"))
+        const quizStats: Record<string, { total: number; count: number }> = {}
+        qSnap.docs.forEach(d => {
+          const data = d.data()
+          const uid = data.studentId
+          if (uid) {
+            if (!quizStats[uid]) quizStats[uid] = { total: 0, count: 0 }
+            quizStats[uid].total += (data.score / data.total) * 100
+            quizStats[uid].count++
+          }
+        })
+
+        const totalMods = resources.reduce((sum, r) => sum + (r.modules?.length || 0), 0)
+        if (totalMods === 0) return
+
+        const entries: { uid: string; displayName: string; gradeLevel: string; overallScore: number }[] = []
+
+        Object.entries(studentMap).forEach(([uid, info]) => {
+          const viewed = moduleCounts[uid] || 0
+          const completionPct = Math.round((viewed / totalMods) * 100)
+          const qs = quizStats[uid]
+          const avgQuizPct = qs && qs.count > 0 ? Math.round(qs.total / qs.count) : 0
+          const overallScore = Math.round(completionPct * 0.50 + avgQuizPct * 0.30)
+          entries.push({ uid, ...info, overallScore })
+        })
+
+        entries.sort((a, b) => b.overallScore - a.overallScore)
+
+        const myGradeLevel = profile?.gradeLevel || ""
+
+        const toEntry = (e: typeof entries[number], rank: number, isHighlight: boolean): LeaderboardEntry => ({
+          rank,
+          initials: e.displayName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() || "?",
+          name: e.displayName,
+          section: e.gradeLevel || "Section A",
+          score: `${e.overallScore}%`,
+          scoreColor: e.overallScore >= 70 ? "text-green-600" : e.overallScore >= 40 ? "text-amber-600" : "text-rose-600",
+          highlight: isHighlight,
+          rankBg: rank === 1 ? "bg-yellow-400" : rank === 2 ? "bg-gray-400" : rank === 3 ? "bg-amber-700" : "bg-gray-300"
+        })
+
+        if (!cancelled) {
+          setLeaderboardData({
+            classRanks: entries.filter(e => e.gradeLevel === myGradeLevel).map((e, i) => toEntry(e, i + 1, e.uid === user.uid)),
+            batchRanks: entries.map((e, i) => toEntry(e, i + 1, e.uid === user.uid))
+          })
+        }
+      } catch (err) {
+        console.error("Failed to fetch leaderboard data:", err)
+      } finally {
+        if (!cancelled) setLeaderboardLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [resources, user, profile])
 
   const markModuleViewed = async (resourceId: string, moduleIdx: number) => {
     if (!user?.uid) return
@@ -1498,46 +1582,66 @@ export default function Student() {
                         <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
                           <i className="fas fa-trophy text-amber-500 text-sm" /> {t("Class Leaderboard")}
                         </h3>
-                        {[
-                          { rank: 1, initials: "JD", name: "Juan Dela Cruz", section: "Section A", score: "89%", scoreColor: "text-green-600", highlight: true, rankBg: "bg-yellow-400" },
-                          { rank: 2, initials: "MP", name: "Maria Perez", section: "Section A", score: "76%", scoreColor: "text-green-600", highlight: false, rankBg: "bg-gray-400" },
-                          { rank: 3, initials: "MS", name: "Maria Santos", section: "Section A", score: "52%", scoreColor: "text-green-600", highlight: true, rankBg: "bg-amber-700" },
-                          { rank: 4, initials: "CR", name: "Carlos Reyes", section: "Section A", score: "48%", scoreColor: "text-amber-600", highlight: false, rankBg: "bg-gray-300" },
-                          { rank: 5, initials: "AG", name: "Ana Gomez", section: "Section A", score: "35%", scoreColor: "text-rose-600", highlight: false, rankBg: "bg-gray-300" }
-                        ].map((s) => (
-                          <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? (s.rank === 3 ? "bg-blue-50 border border-blue-200" : "bg-amber-50 border border-amber-200") : "hover:bg-gray-50"}`}>
-                            <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center`}>{s.rank}</span>
-                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold">{s.initials}</div>
-                            <div className="flex-1">
-                              <p className="text-sm font-medium text-gray-800">{s.name}</p>
-                              <p className="text-xs text-gray-400">{s.section}</p>
-                            </div>
-                            <span className={`text-sm font-semibold ${s.scoreColor}`}>{s.score}</span>
+                        {leaderboardLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <div className="w-6 h-6 border-2 border-navy-500 border-t-transparent rounded-full animate-spin" />
                           </div>
-                        ))}
+                        ) : leaderboardData.classRanks.length === 0 ? (
+                          <div className="text-center py-6">
+                            <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-2">
+                              <i className="fas fa-users text-gray-300 text-lg" />
+                            </div>
+                            <p className="text-xs text-gray-400">{t("No other students in your class yet")}</p>
+                          </div>
+                        ) : (
+                          leaderboardData.classRanks.map((s) => (
+                            <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? "bg-amber-50 border border-amber-200" : "hover:bg-gray-50"}`}>
+                              <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center`}>{s.rank}</span>
+                              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold">{s.initials}</div>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-sm font-medium text-gray-800">{s.name}</p>
+                                  {s.highlight && <span className="text-[9px] font-medium text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">You</span>}
+                                </div>
+                                <p className="text-xs text-gray-400">{s.section}</p>
+                              </div>
+                              <span className={`text-sm font-semibold ${s.scoreColor}`}>{s.score}</span>
+                            </div>
+                          ))
+                        )}
                       </div>
 
                       <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                         <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                          <i className="fas fa-users text-navy-500 text-sm" /> {t("Batch Leaderboard")}
+                          <i className="fas fa-globe text-navy-500 text-sm" /> {t("Batch Leaderboard")}
                         </h3>
-                        {[
-                          { rank: 1, initials: "JD", name: "Juan Dela Cruz", section: "Section A", score: "89%", highlight: true, rankBg: "bg-yellow-400" },
-                          { rank: 2, initials: "MP", name: "Maria Perez", section: "Section A", score: "76%", highlight: false, rankBg: "bg-gray-400" },
-                          { rank: 3, initials: "MS", name: "Maria Santos", section: "Section A", score: "52%", highlight: true, rankBg: "bg-amber-700" },
-                          { rank: 4, initials: "CR", name: "Carlos Reyes", section: "Section B", score: "48%", highlight: false, rankBg: "bg-gray-300" },
-                          { rank: 5, initials: "AG", name: "Ana Gomez", section: "Section C", score: "35%", highlight: false, rankBg: "bg-gray-300" }
-                        ].map((s) => (
-                          <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? (s.rank === 3 ? "bg-blue-50 border border-blue-200" : "bg-amber-50 border border-amber-200") : "hover:bg-gray-50"}`}>
-                            <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center`}>{s.rank}</span>
-                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold">{s.initials}</div>
-                            <div className="flex-1">
-                              <p className="text-sm font-medium text-gray-800">{s.name}</p>
-                              <p className="text-xs text-gray-400">{s.section}</p>
-                            </div>
-                            <span className="text-sm font-semibold text-green-600">{s.score}</span>
+                        {leaderboardLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <div className="w-6 h-6 border-2 border-navy-500 border-t-transparent rounded-full animate-spin" />
                           </div>
-                        ))}
+                        ) : leaderboardData.batchRanks.length === 0 ? (
+                          <div className="text-center py-6">
+                            <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-2">
+                              <i className="fas fa-users text-gray-300 text-lg" />
+                            </div>
+                            <p className="text-xs text-gray-400">{t("No other students enrolled yet")}</p>
+                          </div>
+                        ) : (
+                          leaderboardData.batchRanks.map((s) => (
+                            <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? "bg-amber-50 border border-amber-200" : "hover:bg-gray-50"}`}>
+                              <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center`}>{s.rank}</span>
+                              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold">{s.initials}</div>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-sm font-medium text-gray-800">{s.name}</p>
+                                  {s.highlight && <span className="text-[9px] font-medium text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">You</span>}
+                                </div>
+                                <p className="text-xs text-gray-400">{s.section}</p>
+                              </div>
+                              <span className="text-sm font-semibold text-green-600">{s.score}</span>
+                            </div>
+                          ))
+                        )}
                       </div>
                     </div>
                   </>
