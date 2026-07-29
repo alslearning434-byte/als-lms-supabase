@@ -33,7 +33,6 @@ export default function Student() {
   const [logoutOpen, setLogoutOpen] = useState(false)
   const [pwdOpen, setPwdOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
-  const [activeCarouselIdx, setActiveCarouselIdx] = useState(0)
   const [deadlinesExpanded, setDeadlinesExpanded] = useState(false)
   const [progressExpanded, setProgressExpanded] = useState(false)
   const [badgesExpanded, setBadgesExpanded] = useState(false)
@@ -321,10 +320,6 @@ export default function Student() {
     }
   }, [congratsTarget, activePage])
 
-  useEffect(() => {
-    setActiveCarouselIdx(0)
-  }, [resources])
-
   const markModuleViewed = async (resourceId: string, moduleIdx: number) => {
     if (!user?.uid) return
     const key = `${user.uid}_${resourceId}`
@@ -584,64 +579,42 @@ export default function Student() {
                           <p className="text-xs text-gray-400 mt-1">{t("Start a module from My Modules page")}</p>
                         </div>
                       ) : (
-                        <div className="relative flex-1 flex flex-col">
-                          <div className="overflow-hidden flex-1">
-                            <div className="flex gap-4 transition-transform duration-400 ease-in-out"
-                              style={{ transform: `translateX(-${activeCarouselIdx * 100}%)` }}>
-                              {activeRes.map((r, i) => {
-                                const c = colorCycle[i % colorCycle.length]
-                                const pct = Math.round((r.viewed.length / r.total) * 100)
-                                const currentMod = r.resource.modules[r.viewed.length] || r.resource.modules[r.total - 1]
-                                return (
-                                  <div key={r.resource.id} className="min-w-full flex-shrink-0">
-                                    <div className="module-card p-5 flex flex-col h-full">
-                                      <div className="flex-1">
-                                        <div className="flex items-start justify-between mb-3">
-                                          <div className="flex-1">
-                                            <div className="flex items-center gap-2 mb-1">
-                                              <h4 className="font-semibold text-gray-800 text-lg">{r.resource.title}</h4>
-                                              <span className={`text-sm font-medium ${c.labelColor} ${c.bg} px-2.5 py-0.5 rounded`}>{pct}%</span>
-                                            </div>
-                                            <p className="text-base text-gray-400">{t("Current:")} {currentMod?.name || `Module ${r.viewed.length + 1}`}</p>
+                        <div className="overflow-x-auto flex-1 -mx-1 px-1 scrollbar-thin"
+                          style={{ scrollSnapType: "x mandatory" }}>
+                          <div className="flex gap-4 pb-2">
+                            {activeRes.map((r, i) => {
+                              const c = colorCycle[i % colorCycle.length]
+                              const pct = Math.round((r.viewed.length / r.total) * 100)
+                              const currentMod = r.resource.modules[r.viewed.length] || r.resource.modules[r.total - 1]
+                              return (
+                                <div key={r.resource.id} className="flex-shrink-0 w-72" style={{ scrollSnapAlign: "start" }}>
+                                  <div className="module-card p-5 flex flex-col h-full">
+                                    <div className="flex-1">
+                                      <div className="flex items-start justify-between mb-3">
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-2 mb-1">
+                                            <h4 className="font-semibold text-gray-800 text-lg truncate">{r.resource.title}</h4>
+                                            <span className={`text-sm font-medium ${c.labelColor} ${c.bg} px-2.5 py-0.5 rounded whitespace-nowrap`}>{pct}%</span>
                                           </div>
-                                        </div>
-                                        <div className="progress-bar mb-4 h-2.5">
-                                          <div className={`progress-fill ${c.color}`} style={{ width: `${pct}%` }} />
+                                          <p className="text-base text-gray-400 truncate">{t("Current:")} {currentMod?.name || `Module ${r.viewed.length + 1}`}</p>
                                         </div>
                                       </div>
-                                      <button onClick={() => {
-                                        const idx = firstUnviewedIdx(r)
-                                        setViewContent({ resource: r.resource, moduleIdx: idx })
-                                        goTo("modules")
-                                      }} className="w-full py-2.5 bg-navy-400 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 hover:bg-navy-500 transition">
-                                        {t("Continue Lesson")} <i className="fas fa-arrow-right text-xs" />
-                                      </button>
+                                      <div className="progress-bar mb-4 h-2.5">
+                                        <div className={`progress-fill ${c.color}`} style={{ width: `${pct}%` }} />
+                                      </div>
                                     </div>
+                                    <button onClick={() => {
+                                      const idx = firstUnviewedIdx(r)
+                                      setViewContent({ resource: r.resource, moduleIdx: idx })
+                                      goTo("modules")
+                                    }} className="w-full py-2.5 bg-navy-400 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 hover:bg-navy-500 transition">
+                                      {t("Continue Lesson")} <i className="fas fa-arrow-right text-xs" />
+                                    </button>
                                   </div>
-                                )
-                              })}
-                            </div>
+                                </div>
+                              )
+                            })}
                           </div>
-                          {activeRes.length > 1 && (
-                            <div className="flex items-center justify-between mt-3">
-                              <button onClick={() => setActiveCarouselIdx(Math.max(0, activeCarouselIdx - 1))}
-                                disabled={activeCarouselIdx === 0}
-                                className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition shadow-sm">
-                                <i className="fas fa-chevron-left text-xs text-gray-600" />
-                              </button>
-                              <div className="flex items-center gap-1.5">
-                                {activeRes.map((_, i) => (
-                                  <button key={i} onClick={() => setActiveCarouselIdx(i)}
-                                    className={`rounded-full transition-all duration-300 ${i === activeCarouselIdx ? "w-5 h-2 bg-navy-500" : "w-2 h-2 bg-gray-300 hover:bg-gray-400"}`} />
-                                ))}
-                              </div>
-                              <button onClick={() => setActiveCarouselIdx(Math.min(activeRes.length - 1, activeCarouselIdx + 1))}
-                                disabled={activeCarouselIdx === activeRes.length - 1}
-                                className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition shadow-sm">
-                                <i className="fas fa-chevron-right text-xs text-gray-600" />
-                              </button>
-                            </div>
-                          )}
                         </div>
                       )}
                     </div>
@@ -1256,165 +1229,241 @@ export default function Student() {
             <div>
               <h2 className="text-2xl font-bold text-gray-800">{t("My Progress")}</h2>
               <p className="text-gray-500 mt-1 mb-6">{t("Monitor your academic performance and achievements")}</p>
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-                <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                  <div className="flex items-start gap-3 mb-5">
-                    <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center text-green-600">
-                      <i className="fas fa-chart-simple text-lg" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-gray-800">{t("Overall Progress")}</h3>
-                      <p className="text-sm text-gray-400">{t("Your learning completion status")}</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center pl-4">
-                    <div className="relative w-28 h-28 flex-shrink-0">
-                      <svg className="w-28 h-28 -rotate-90" viewBox="0 0 72 72">
-                        <circle cx="36" cy="36" r="30" fill="none" stroke="#e2e8f0" strokeWidth="6" />
-                        <circle cx="36" cy="36" r="30" fill="none" stroke="#22c55e" strokeWidth="6" strokeLinecap="round" strokeDasharray="188.5" strokeDashoffset="90.5" />
-                      </svg>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-2xl font-bold text-gray-800 -mb-0.5">52%</span>
-                        <span className="text-[10px] font-medium text-gray-400">{t("Complete")}</span>
-                      </div>
-                    </div>
-                    <div className="flex-1 space-y-4">
-                      {[
-                        { icon: "fa-check-double", bg: "bg-blue-100", color: "text-blue-600", label: t("Modules Completed"), value: "21", total: "/ 40" },
-                        { icon: "fa-calendar", bg: "bg-green-100", color: "text-amber-600", label: t("Estimated Completion"), value: "October 2026" },
-                        { icon: "fa-fire", bg: "bg-yellow-200", color: "text-rose-600", label: t("Study Streak"), value: "5", suffix: t("days") }
-                      ].map((s) => (
-                        <div key={s.label} className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-lg ${s.bg} flex items-center justify-center ${s.color} flex-shrink-0`}>
-                            <i className={`fas ${s.icon} text-sm`} />
+
+              {(() => {
+                const totalMods = resources.reduce((sum, r) => sum + (r.modules?.length || 0), 0)
+                const viewedCount = resources.reduce((sum, r) => sum + (progressMap[r.id]?.length || 0), 0)
+                const pct = totalMods > 0 ? Math.round((viewedCount / totalMods) * 100) : 0
+                const circumference = 2 * Math.PI * 30
+                const dashoffset = circumference - (pct / 100) * circumference
+                const remaining = totalMods - viewedCount
+                const qEntries = Object.entries(quizSubmissions)
+                const quizzesTaken = qEntries.length
+                const avgScore = quizzesTaken > 0 ? Math.round(qEntries.reduce((sum, [, s]) => sum + (s.score / s.total) * 100, 0) / quizzesTaken) : 0
+                const passedCount = qEntries.filter(([, s]) => s.passed).length
+                const passRate = quizzesTaken > 0 ? Math.round((passedCount / quizzesTaken) * 100) : 0
+                const completedResources = resources.filter(r => {
+                  const viewed = progressMap[r.id] || []
+                  return r.modules?.length > 0 && viewed.length >= r.modules.length
+                })
+                const bestQuiz = qEntries.length > 0 ? qEntries.reduce((best, [, s]) => {
+                  const pct = (s.score / s.total) * 100
+                  return pct > best.pct ? { pct } : best
+                }, { pct: 0 }) : null
+
+                const subjectBadge: Record<string, string> = {
+                  math: "🧮", algebra: "📐", geometry: "🔺", calculus: "∫",
+                  english: "📚", grammar: "✍️", writing: "🖋️", reading: "📖", "oral communication": "🎤", research: "🔍",
+                  filipino: "🏝️", tagalog: "🏝️", "pagbasa at pagsulat": "📜", komunikasyon: "🗣️",
+                  science: "🧪", biology: "🧬", chemistry: "⚗️", physics: "⚛️", earth: "🌍",
+                  "social studies": "🏛️", history: "📜", "araling panlipunan": "🏛️", politics: "🗳️", economics: "📊",
+                  technology: "🖥️", ict: "🖥️", computer: "💻", empowerment: "🚀",
+                  tle: "🛠️", livelihood: "🧰", cookery: "👨‍🍳", welding: "⚡",
+                  mapeh: "🎭", arts: "🎨", "creative writing": "✒️", music: "🎵", "contemporary arts": "🎭",
+                  pe: "🏃", sports: "🏀", health: "💪", "physical education": "🏅",
+                  values: "🤝", ethics: "⚖️", philosophy: "🧠", logic: "🧠",
+                  business: "💼", abm: "💼", accountancy: "📊", management: "📋", entrepreneurship: "🚀",
+                  environment: "🌱", agriculture: "🌾", ecology: "🌿",
+                  language: "🌐",
+                }
+                const getBadge = (s: string) => Object.entries(subjectBadge).find(([key]) => s.toLowerCase().includes(key))?.[1] || "🏆"
+
+                const achievements: { title: string; desc: string; icon: string; color: string; highlight: boolean }[] = []
+                if (completedResources.length >= 1) {
+                  achievements.push({ title: "First Steps", desc: `Completed "${completedResources[0].title}"`, icon: "fa-leaf", color: "bg-green-500", highlight: false })
+                }
+                if (completedResources.length >= 3) {
+                  achievements.push({ title: "Fast Learner", desc: `Completed ${completedResources.length} courses`, icon: "fa-trophy", color: "bg-amber-500", highlight: true })
+                }
+                if (bestQuiz && bestQuiz.pct >= 100) {
+                  achievements.push({ title: "Perfect Score", desc: `Scored 100% on a quiz`, icon: "fa-star", color: "bg-blue-500", highlight: false })
+                }
+                if (passedCount >= 3) {
+                  achievements.push({ title: "Quiz Master", desc: `Passed ${passedCount} quizzes`, icon: "fa-brain", color: "bg-purple-500", highlight: false })
+                }
+
+                return (
+                  <>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+                      <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                        <div className="flex items-start gap-3 mb-5">
+                          <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center text-green-600">
+                            <i className="fas fa-chart-simple text-lg" />
                           </div>
                           <div>
-                            <p className="text-sm font-medium text-gray-800">{s.label}</p>
-                            <p className="text-lg font-bold text-gray-800">
-                              {s.value} {s.total && <span className="text-sm font-normal text-gray-400">{s.total}</span>}
-                              {s.suffix && <span className="text-sm text-gray-400"> {s.suffix}</span>}
-                            </p>
+                            <h3 className="font-semibold text-gray-800">{t("Overall Progress")}</h3>
+                            <p className="text-sm text-gray-400">{t("Your learning completion status")}</p>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                  <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                    <i className="fas fa-award text-amber-500 text-sm" /> Recent Achievement
-                  </h3>
-                  <div className="space-y-3">
-                    {[
-                      { title: "Fast Learner", desc: "Completed 5 lessons in a week", date: "Earned May 20, 2026", color: "bg-amber-500", icon: "fa-trophy", highlight: true },
-                      { title: "Quiz Master", desc: "Scored 90% on Communication Skills Quiz", date: "Earned May 15, 2026", color: "bg-blue-500", icon: "fa-star", highlight: false },
-                      { title: "First Steps", desc: "Completed your first module", date: "Earned Jan 10, 2026", color: "bg-green-500", icon: "fa-leaf", highlight: false }
-                    ].map((a) => (
-                      <div key={a.title} className={`flex items-start gap-3 p-3 rounded-lg ${a.highlight ? "bg-amber-50 border border-amber-200" : "hover:bg-gray-50"}`}>
-                        <div className={`w-10 h-10 rounded-full ${a.color} flex items-center justify-center text-white text-lg`}>
-                          <i className={`fas ${a.icon}`} />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center pl-4">
+                          <div className="relative w-28 h-28 flex-shrink-0">
+                            <svg className="w-28 h-28 -rotate-90" viewBox="0 0 72 72">
+                              <circle cx="36" cy="36" r="30" fill="none" stroke="#e2e8f0" strokeWidth="6" />
+                              <circle cx="36" cy="36" r="30" fill="none" stroke={pct >= 100 ? "#22c55e" : "#1A73E8"} strokeWidth="6" strokeLinecap="round"
+                                strokeDasharray={circumference} strokeDashoffset={Math.max(0, dashoffset)} style={{ transition: "stroke-dashoffset 0.8s ease" }} />
+                            </svg>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center">
+                              <span className="text-2xl font-bold text-gray-800 -mb-0.5">{pct}%</span>
+                              <span className="text-[10px] font-medium text-gray-400">{t("Complete")}</span>
+                            </div>
+                          </div>
+                          <div className="flex-1 space-y-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 flex-shrink-0">
+                                <i className="fas fa-check-double text-sm" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-gray-800">{t("Modules Completed")}</p>
+                                <p className="text-lg font-bold text-gray-800">
+                                  {viewedCount} <span className="text-sm font-normal text-gray-400">/ {totalMods}</span>
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600 flex-shrink-0">
+                                <i className="fas fa-clipboard-list text-sm" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-gray-800">{t("Quizzes Taken")}</p>
+                                <p className="text-lg font-bold text-gray-800">{quizzesTaken}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center text-amber-600 flex-shrink-0">
+                                <i className="fas fa-percentage text-sm" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-gray-800">{t("Average Quiz Score")}</p>
+                                <p className="text-lg font-bold text-gray-800">
+                                  {avgScore}% <span className="text-sm font-normal text-gray-400">{"\u2022"} {passRate}% {t("pass rate")}</span>
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-rose-100 flex items-center justify-center text-rose-600 flex-shrink-0">
+                                <i className="fas fa-clock text-sm" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-gray-800">{t("Remaining")}</p>
+                                <p className="text-lg font-bold text-gray-800">{remaining} <span className="text-sm font-normal text-gray-400">{t("modules")}</span></p>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-semibold text-gray-800">{a.title}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">{a.desc}</p>
-                          <p className={`text-[10px] mt-1 font-medium ${a.highlight ? "text-amber-600" : "text-blue-600"}`}>{a.date}</p>
+                      </div>
+
+                      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                        <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                          <i className="fas fa-award text-amber-500 text-sm" /> {t("Achievements")}
+                        </h3>
+                        <div className="space-y-3">
+                          {achievements.length === 0 ? (
+                            <div className="text-center py-6">
+                              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-2">
+                                <i className="fas fa-flag-checkered text-gray-300 text-lg" />
+                              </div>
+                              <p className="text-xs text-gray-400">{t("Complete modules and quizzes to earn achievements")}</p>
+                            </div>
+                          ) : (
+                            achievements.map((a) => (
+                              <div key={a.title} className={`flex items-start gap-3 p-3 rounded-lg ${a.highlight ? "bg-amber-50 border border-amber-200" : "hover:bg-gray-50"}`}>
+                                <div className={`w-10 h-10 rounded-full ${a.color} flex items-center justify-center text-white text-lg shrink-0`}>
+                                  <i className={`fas ${a.icon}`} />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-semibold text-gray-800">{a.title}</p>
+                                  <p className="text-xs text-gray-400 mt-0.5">{a.desc}</p>
+                                </div>
+                              </div>
+                            ))
+                          )}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm mb-6">
-                <h3 className="font-semibold text-gray-800 mb-5 flex items-center gap-2">
-                  <i className="fas fa-award text-amber-500 text-sm" /> Badges <span className="text-sm font-normal text-gray-400">(21 earned)</span>
-                </h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                  {[
-                    { name: "Communication Skills I", badge: "⭐", color: "bg-yellow-100" },
-                    { name: "Communication Skills II", badge: "🏆", color: "bg-amber-100" },
-                    { name: "Scientific Literacy I", badge: "🔥", color: "bg-orange-100" },
-                    { name: "Scientific Literacy II", badge: "💎", color: "bg-blue-100" },
-                    { name: "Mathematical Reasoning I", badge: "👑", color: "bg-purple-100" },
-                    { name: "Mathematical Reasoning II", badge: "🎯", color: "bg-red-100" },
-                    { name: "Life & Career Skills I", badge: "🚀", color: "bg-indigo-100" },
-                    { name: "Life & Career Skills II", badge: "🎖️", color: "bg-teal-100" },
-                    { name: "English Language I", badge: "🏅", color: "bg-green-100" },
-                    { name: "English Language II", badge: "✨", color: "bg-pink-100" },
-                    { name: "Digital Literacy I", badge: "⚡", color: "bg-yellow-100" },
-                    { name: "Digital Literacy II", badge: "🛡️", color: "bg-cyan-100" },
-                    { name: "Physical Education I", badge: "💪", color: "bg-lime-100" },
-                    { name: "Physical Education II", badge: "🏀", color: "bg-orange-100" },
-                    { name: "Social Studies I", badge: "📜", color: "bg-amber-100" },
-                    { name: "Social Studies II", badge: "🌍", color: "bg-emerald-100" },
-                    { name: "Values Education I", badge: "🤝", color: "bg-rose-100" },
-                    { name: "Values Education II", badge: "🌈", color: "bg-violet-100" },
-                    { name: "Arts & Design I", badge: "🎨", color: "bg-fuchsia-100" },
-                    { name: "Arts & Design II", badge: "🎵", color: "bg-sky-100" },
-                    { name: "Technology & Livelihood", badge: "🔧", color: "bg-stone-100" }
-                  ].slice(0, badgesExpanded ? undefined : 5).map((b) => (
-                    <div key={b.name} className={`flex flex-col items-center text-center p-3 rounded-xl ${b.color} border border-gray-200/50`}>
-                      <span className="text-3xl mb-1">{b.badge}</span>
-                      <p className="text-[10px] font-semibold text-gray-700 leading-tight">{b.name}</p>
                     </div>
-                  ))}
-                </div>
-                <div className="flex justify-center mt-4">
-                  <button onClick={() => setBadgesExpanded((p) => !p)}
-                    className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition">
-                    <i className={`fas fa-chevron-down text-gray-500 text-sm transition-transform duration-300 ${badgesExpanded ? "rotate-180" : ""}`} />
-                  </button>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                  <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                    <i className="fas fa-trophy text-amber-500 text-sm" /> Class Leaderboard
-                  </h3>
-                  {[
-                    { rank: 1, initials: "JD", name: "Juan Dela Cruz", section: "Section A", score: "89%", scoreColor: "text-green-600", highlight: true, rankBg: "bg-yellow-400" },
-                    { rank: 2, initials: "MP", name: "Maria Perez", section: "Section A", score: "76%", scoreColor: "text-green-600", highlight: false, rankBg: "bg-gray-400" },
-                    { rank: 3, initials: "MS", name: "Maria Santos", section: "Section A", score: "52%", scoreColor: "text-green-600", highlight: true, rankBg: "bg-amber-700" },
-                    { rank: 4, initials: "CR", name: "Carlos Reyes", section: "Section A", score: "48%", scoreColor: "text-amber-600", highlight: false, rankBg: "bg-gray-300" },
-                    { rank: 5, initials: "AG", name: "Ana Gomez", section: "Section A", score: "35%", scoreColor: "text-rose-600", highlight: false, rankBg: "bg-gray-300" }
-                  ].map((s) => (
-                    <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? (s.rank === 3 ? "bg-blue-50 border border-blue-200" : "bg-amber-50 border border-amber-200") : "hover:bg-gray-50"}`}>
-                      <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center`}>{s.rank}</span>
-                      <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold">{s.initials}</div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-800">{s.name}</p>
-                        <p className="text-xs text-gray-400">{s.section}</p>
+                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm mb-6">
+                      <h3 className="font-semibold text-gray-800 mb-5 flex items-center gap-2">
+                        <i className="fas fa-award text-amber-500 text-sm" /> {t("Badges")} <span className="text-sm font-normal text-gray-400">({completedResources.length} earned)</span>
+                      </h3>
+                      {completedResources.length === 0 ? (
+                        <div className="text-center py-8">
+                          <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-3">
+                            <i className="fas fa-medal text-gray-300 text-xl" />
+                          </div>
+                          <p className="text-sm text-gray-400">{t("Complete a course to earn your first badge")}</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                          {completedResources.map((r, i) => {
+                            const badge = getBadge(r.subject)
+                            const pastelColors = [
+                              "bg-yellow-100", "bg-amber-100", "bg-orange-100", "bg-blue-100", "bg-purple-100",
+                              "bg-red-100", "bg-teal-100", "bg-green-100", "bg-pink-100", "bg-cyan-100",
+                              "bg-lime-100", "bg-rose-100", "bg-violet-100", "bg-fuchsia-100", "bg-sky-100",
+                              "bg-emerald-100", "bg-indigo-100", "bg-stone-100", "bg-amber-100", "bg-blue-100",
+                            ]
+                            return (
+                              <div key={r.id} className="flex flex-col items-center text-center p-3 rounded-xl border border-gray-200/50"
+                                style={{ backgroundColor: pastelColors[i % pastelColors.length] }}>
+                                <span className="text-3xl mb-1">{badge}</span>
+                                <p className="text-[10px] font-semibold text-gray-700 leading-tight truncate w-full">{r.title}</p>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                        <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                          <i className="fas fa-trophy text-amber-500 text-sm" /> {t("Class Leaderboard")}
+                        </h3>
+                        {[
+                          { rank: 1, initials: "JD", name: "Juan Dela Cruz", section: "Section A", score: "89%", scoreColor: "text-green-600", highlight: true, rankBg: "bg-yellow-400" },
+                          { rank: 2, initials: "MP", name: "Maria Perez", section: "Section A", score: "76%", scoreColor: "text-green-600", highlight: false, rankBg: "bg-gray-400" },
+                          { rank: 3, initials: "MS", name: "Maria Santos", section: "Section A", score: "52%", scoreColor: "text-green-600", highlight: true, rankBg: "bg-amber-700" },
+                          { rank: 4, initials: "CR", name: "Carlos Reyes", section: "Section A", score: "48%", scoreColor: "text-amber-600", highlight: false, rankBg: "bg-gray-300" },
+                          { rank: 5, initials: "AG", name: "Ana Gomez", section: "Section A", score: "35%", scoreColor: "text-rose-600", highlight: false, rankBg: "bg-gray-300" }
+                        ].map((s) => (
+                          <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? (s.rank === 3 ? "bg-blue-50 border border-blue-200" : "bg-amber-50 border border-amber-200") : "hover:bg-gray-50"}`}>
+                            <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center`}>{s.rank}</span>
+                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold">{s.initials}</div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-800">{s.name}</p>
+                              <p className="text-xs text-gray-400">{s.section}</p>
+                            </div>
+                            <span className={`text-sm font-semibold ${s.scoreColor}`}>{s.score}</span>
+                          </div>
+                        ))}
                       </div>
-                      <span className={`text-sm font-semibold ${s.scoreColor}`}>{s.score}</span>
-                    </div>
-                  ))}
-                </div>
 
-                <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                  <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                    <i className="fas fa-users text-navy-500 text-sm" /> Batch Leaderboard
-                  </h3>
-                  {[
-                    { rank: 1, initials: "JD", name: "Juan Dela Cruz", section: "Section A", score: "89%", highlight: true, rankBg: "bg-yellow-400" },
-                    { rank: 2, initials: "MP", name: "Maria Perez", section: "Section A", score: "76%", highlight: false, rankBg: "bg-gray-400" },
-                    { rank: 3, initials: "MS", name: "Maria Santos", section: "Section A", score: "52%", highlight: true, rankBg: "bg-amber-700" },
-                    { rank: 4, initials: "CR", name: "Carlos Reyes", section: "Section B", score: "48%", highlight: false, rankBg: "bg-gray-300" },
-                    { rank: 5, initials: "AG", name: "Ana Gomez", section: "Section C", score: "35%", highlight: false, rankBg: "bg-gray-300" }
-                  ].map((s) => (
-                    <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? (s.rank === 3 ? "bg-blue-50 border border-blue-200" : "bg-amber-50 border border-amber-200") : "hover:bg-gray-50"}`}>
-                      <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center`}>{s.rank}</span>
-                      <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold">{s.initials}</div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-800">{s.name}</p>
-                        <p className="text-xs text-gray-400">{s.section}</p>
+                      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                        <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                          <i className="fas fa-users text-navy-500 text-sm" /> {t("Batch Leaderboard")}
+                        </h3>
+                        {[
+                          { rank: 1, initials: "JD", name: "Juan Dela Cruz", section: "Section A", score: "89%", highlight: true, rankBg: "bg-yellow-400" },
+                          { rank: 2, initials: "MP", name: "Maria Perez", section: "Section A", score: "76%", highlight: false, rankBg: "bg-gray-400" },
+                          { rank: 3, initials: "MS", name: "Maria Santos", section: "Section A", score: "52%", highlight: true, rankBg: "bg-amber-700" },
+                          { rank: 4, initials: "CR", name: "Carlos Reyes", section: "Section B", score: "48%", highlight: false, rankBg: "bg-gray-300" },
+                          { rank: 5, initials: "AG", name: "Ana Gomez", section: "Section C", score: "35%", highlight: false, rankBg: "bg-gray-300" }
+                        ].map((s) => (
+                          <div key={s.name} className={`flex items-center gap-3 p-2 rounded-lg ${s.highlight ? (s.rank === 3 ? "bg-blue-50 border border-blue-200" : "bg-amber-50 border border-amber-200") : "hover:bg-gray-50"}`}>
+                            <span className={`w-6 h-6 rounded-full ${s.rankBg} text-white text-xs font-bold flex items-center justify-center`}>{s.rank}</span>
+                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-sm font-semibold">{s.initials}</div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-800">{s.name}</p>
+                              <p className="text-xs text-gray-400">{s.section}</p>
+                            </div>
+                            <span className="text-sm font-semibold text-green-600">{s.score}</span>
+                          </div>
+                        ))}
                       </div>
-                      <span className="text-sm font-semibold text-green-600">{s.score}</span>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </>
+                )
+              })()}
             </div>
           )}
 
