@@ -402,191 +402,283 @@ export default function Student() {
                 <p className="text-gray-500 mt-1">{t("Continue your learning journey today")}</p>
               </div>
 
-              <div className="stat-card mb-5">
-                <p className="text-gray-500 text-sm font-medium mb-5">{t("Overall Progress Tracker")}</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-                  <div className="flex justify-center">
-                    <div className="relative w-48 h-48">
-                      <svg className="w-48 h-48 -rotate-90" viewBox="0 0 100 100">
-                        <circle cx="50" cy="50" r="42" fill="none" stroke="#e2e8f0" strokeWidth="8" />
-                        <circle cx="50" cy="50" r="42" fill="none" stroke="#22c55e" strokeWidth="8" strokeLinecap="round" strokeDasharray="263.89" strokeDashoffset="126.67" />
-                      </svg>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-3xl font-bold text-gray-800 -mb-0.5">52%</span>
-                        <span className="text-xs font-medium text-gray-400">{t("Complete")}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-base font-medium text-gray-700">{t("Completed Modules")}</span>
-                        <span className="text-base text-gray-500">21/40</span>
-                      </div>
-                      <div className="progress-bar h-2.5">
-                        <div className="progress-fill bg-green-500" style={{ width: "52.5%" }} />
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-base font-medium text-gray-700">{t("Remaining Modules")}</span>
-                        <span className="text-base text-gray-500">19/40</span>
-                      </div>
-                      <div className="progress-bar h-2.5">
-                        <div className="progress-fill bg-green-300" style={{ width: "47.5%" }} />
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm pt-2">
-                      <span className="w-2 h-2 rounded-full bg-green-500" />
-                      <span className="font-medium text-green-600">{t("On Track")}</span>
-                      <span className="text-gray-300">•</span>
-                      <span className="text-gray-400">{t("Estimated completion: October 2026")}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-center mt-4">
-                  <button onClick={() => setProgressExpanded((p) => !p)}
-                    className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition">
-                    <i className={`fas fa-chevron-down text-gray-500 text-sm transition-transform duration-300 ${progressExpanded ? "rotate-180" : ""}`} />
-                  </button>
-                </div>
-
-                {progressExpanded && (
-                  <div className="mt-4 pt-4 border-t border-gray-200 animate-fade">
-                    <p className="text-sm font-semibold text-gray-700 mb-3">{t("Completed Modules (21)")}</p>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {[
-                        { name: "Communication Skills I", icon: "fa-comments", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Effective Writing Techniques", badge: "⭐", badgeColor: "bg-yellow-100 text-yellow-700" },
-                        { name: "Communication Skills II", icon: "fa-comments", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Public Speaking", badge: "🏆", badgeColor: "bg-amber-100 text-amber-700" },
-                        { name: "Scientific Literacy I", icon: "fa-flask", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Environmental Science", badge: "🔥", badgeColor: "bg-orange-100 text-orange-700" },
-                        { name: "Scientific Literacy II", icon: "fa-flask", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Biology Basics", badge: "💎", badgeColor: "bg-blue-100 text-blue-700" },
-                        { name: "Mathematical Reasoning I", icon: "fa-calculator", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Algebra Fundamentals", badge: "👑", badgeColor: "bg-purple-100 text-purple-700" },
-                        { name: "Mathematical Reasoning II", icon: "fa-calculator", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Geometry", badge: "🎯", badgeColor: "bg-red-100 text-red-700" },
-                        { name: "Life & Career Skills I", icon: "fa-briefcase", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Financial Literacy", badge: "🚀", badgeColor: "bg-indigo-100 text-indigo-700" },
-                        { name: "Life & Career Skills II", icon: "fa-briefcase", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Entrepreneurship", badge: "🎖️", badgeColor: "bg-teal-100 text-teal-700" },
-                        { name: "English Language I", icon: "fa-globe", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Grammar & Composition", badge: "🏅", badgeColor: "bg-green-100 text-green-700" },
-                        { name: "English Language II", icon: "fa-globe", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Literature", badge: "✨", badgeColor: "bg-pink-100 text-pink-700" },
-                        { name: "Digital Literacy I", icon: "fa-laptop-code", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Computer Fundamentals", badge: "⚡", badgeColor: "bg-yellow-100 text-yellow-700" },
-                        { name: "Digital Literacy II", icon: "fa-laptop-code", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Internet Safety", badge: "🛡️", badgeColor: "bg-cyan-100 text-cyan-700" },
-                        { name: "Physical Education I", icon: "fa-running", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Health & Wellness", badge: "💪", badgeColor: "bg-lime-100 text-lime-700" },
-                        { name: "Physical Education II", icon: "fa-running", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Team Sports", badge: "🏀", badgeColor: "bg-orange-100 text-orange-700" },
-                        { name: "Social Studies I", icon: "fa-landmark", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Philippine History", badge: "📜", badgeColor: "bg-amber-100 text-amber-700" },
-                        { name: "Social Studies II", icon: "fa-landmark", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "World Geography", badge: "🌍", badgeColor: "bg-emerald-100 text-emerald-700" },
-                        { name: "Values Education I", icon: "fa-hand-holding-heart", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Good Citizenship", badge: "🤝", badgeColor: "bg-rose-100 text-rose-700" },
-                        { name: "Values Education II", icon: "fa-hand-holding-heart", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Ethics & Morality", badge: "🌈", badgeColor: "bg-violet-100 text-violet-700" },
-                        { name: "Arts & Design I", icon: "fa-palette", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Visual Arts", badge: "🎨", badgeColor: "bg-fuchsia-100 text-fuchsia-700" },
-                        { name: "Arts & Design II", icon: "fa-palette", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Music Appreciation", badge: "🎵", badgeColor: "bg-sky-100 text-sky-700" },
-                        { name: "Technology & Livelihood", icon: "fa-tools", iconBg: "bg-green-100", iconColor: "text-green-600", desc: "Basic Carpentry", badge: "🔧", badgeColor: "bg-stone-100 text-stone-700" }
-                      ].map((m) => (
-                        <div key={m.name} className="p-4 rounded-xl border border-gray-200 bg-white shadow-sm flex items-start gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className={`w-10 h-10 rounded-full ${m.iconBg} flex items-center justify-center ${m.iconColor} mb-3`}>
-                              <i className={`fas ${m.icon} text-lg`} />
-                            </div>
-                            <p className="font-semibold text-gray-800 text-sm">{m.name}</p>
-                            <p className="text-xs text-gray-400 mt-1">{m.desc}</p>
-                          </div>
-                          <span className={`text-3xl font-bold px-3 py-2 rounded-lg ${m.badgeColor}`}>
-                            {m.badge}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                          </div>
-                        )}
-
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0">
-                <div className="lg:col-span-2 flex flex-col min-h-0">
-                  <h3 className="text-lg font-bold text-gray-800 mb-4">{t("My Active Modules")}</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
-                    {[
-                      { title: "Communication Skills", pct: 75, color: "bg-primary", labelColor: "text-primary", bg: "bg-blue-100", desc: "Effective Writing Techniques" },
-                      { title: "Scientific Literacy", pct: 45, color: "bg-amber-500", labelColor: "text-amber-600", bg: "bg-amber-100", desc: "Environmental Science Basics" },
-                      { title: "Mathematical Reasoning", pct: 60, color: "bg-purple-500", labelColor: "text-purple-600", bg: "bg-purple-100", desc: "Problem Solving Strategies" },
-                      { title: "Life & Career Skills", pct: 30, color: "bg-rose-500", labelColor: "text-rose-600", bg: "bg-rose-100", desc: "Financial Literacy Fundamentals" }
-                    ].map((m) => (
-                      <div key={m.title} className="module-card p-5 flex flex-col">
-                        <div className="flex-1">
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <h4 className="font-semibold text-gray-800 text-lg">{m.title}</h4>
-                                <span className={`text-sm font-medium ${m.labelColor} ${m.bg} px-2.5 py-0.5 rounded`}>{m.pct}%</span>
-                              </div>
-                              <p className="text-base text-gray-400">{t("Current:")} {m.desc}</p>
-                            </div>
-                          </div>
-                          <div className="progress-bar mb-4 h-2.5">
-                            <div className={`progress-fill ${m.color}`} style={{ width: `${m.pct}%` }} />
+              {(() => {
+                const totalMods = resources.reduce((sum, r) => sum + (r.modules?.length || 0), 0)
+                const viewedCount = resources.reduce((sum, r) => sum + (progressMap[r.id]?.length || 0), 0)
+                const pct = totalMods > 0 ? Math.round((viewedCount / totalMods) * 100) : 0
+                const remaining = totalMods - viewedCount
+                const circumference = 2 * Math.PI * 42
+                const dashoffset = circumference - (pct / 100) * circumference
+                const completedResources = resources.filter(r => {
+                  const viewed = progressMap[r.id] || []
+                  return r.modules && r.modules.length > 0 && viewed.length >= r.modules.length
+                })
+                const subjectBadge: Record<string, string> = {
+                  math: "🧮", algebra: "📐", geometry: "🔺", calculus: "∫",
+                  english: "📚", grammar: "✍️", writing: "🖋️", reading: "📖", "oral communication": "🎤", research: "🔍",
+                  filipino: "🏝️", tagalog: "🏝️", "pagbasa at pagsulat": "📜", komunikasyon: "🗣️",
+                  science: "🧪", biology: "🧬", chemistry: "⚗️", physics: "⚛️", earth: "🌍",
+                  "social studies": "🏛️", history: "📜", "araling panlipunan": "🏛️", politics: "🗳️", economics: "📊",
+                  technology: "🖥️", ict: "🖥️", computer: "💻", empowerment: "🚀",
+                  tle: "🛠️", livelihood: "🧰", cookery: "👨‍🍳", welding: "⚡",
+                  mapeh: "🎭", arts: "🎨", "creative writing": "✒️", music: "🎵", "contemporary arts": "🎭",
+                  pe: "🏃", sports: "🏀", health: "💪", "physical education": "🏅",
+                  values: "🤝", "value education": "🤝", "personal development": "🌟", ethics: "⚖️",
+                  business: "💼", abm: "💼", accountancy: "📊", management: "📋", entrepreneurship: "🚀",
+                  philosophy: "🧠", logic: "🧠", psychology: "🧠",
+                  environment: "🌱", agriculture: "🌾", ecology: "🌿",
+                  language: "🌐", spanish: "💃", japanese: "⛩️", french: "🥖",
+                  architecture: "🏗️", design: "🎯", engineering: "⚙️",
+                }
+                const getBadge = (s: string) => Object.entries(subjectBadge).find(([key]) => s.toLowerCase().includes(key))?.[1] || "🏆"
+                return (
+                  <div className="stat-card mb-5">
+                    <p className="text-gray-500 text-sm font-medium mb-5">{t("Overall Progress Tracker")}</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                      <div className="flex justify-center">
+                        <div className="relative w-48 h-48">
+                          <svg className="w-48 h-48 -rotate-90" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="42" fill="none" stroke="#e2e8f0" strokeWidth="8" />
+                            <circle cx="50" cy="50" r="42" fill="none" stroke={pct >= 100 ? "#22c55e" : "#1A73E8"} strokeWidth="8" strokeLinecap="round"
+                              strokeDasharray={circumference} strokeDashoffset={Math.max(0, dashoffset)} style={{ transition: "stroke-dashoffset 0.8s ease" }} />
+                          </svg>
+                          <div className="absolute inset-0 flex flex-col items-center justify-center">
+                            <span className="text-3xl font-bold text-gray-800 -mb-0.5">{pct}%</span>
+                            <span className="text-xs font-medium text-gray-400">{t("Complete")}</span>
                           </div>
                         </div>
-                        <button className="w-full py-2.5 bg-navy-400 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 hover:bg-navy-500 transition">
-                          {t("Continue Lesson")} <i className="fas fa-arrow-right text-xs" />
-                        </button>
                       </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex flex-col">
-                  <h3 className="text-lg font-bold text-gray-800 mb-4">{t("Upcoming Deadlines")}</h3>
-                  <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm flex flex-col" style={{ flex: deadlinesExpanded ? "1" : undefined }}>
-                    <div className="space-y-0" style={{ flex: deadlinesExpanded ? "1" : undefined }}>
-                      {[
-                        { title: "Communication Skills Quiz 3", date: "May 22, 2026", tag: "Quiz", color: "bg-blue-100 text-blue-600", icon: "fa-pen-alt" },
-                        { title: "Scientific Literacy Portfolio", date: "May 25, 2026", tag: "Portfolio", color: "bg-amber-100 text-amber-600", icon: "fa-folder-open" },
-                        { title: "Math Module 2 Assessment", date: "May 28, 2026", tag: "Assessment", color: "bg-purple-100 text-purple-600", icon: "fa-calculator" }
-                      ].map((d) => (
-                        <div key={d.title} className="deadline-item">
-                          <div className="flex items-start gap-3">
-                            <div className={`w-9 h-9 rounded-lg ${d.color} flex items-center justify-center flex-shrink-0`}>
-                              <i className={`fas ${d.icon} text-sm`} />
-                            </div>
-                            <div>
-                              <p className="font-medium text-gray-800 text-sm">{d.title}</p>
-                              <p className="text-xs text-gray-400 mt-0.5">{d.date}</p>
-                            </div>
+                      <div className="space-y-4">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-base font-medium text-gray-700">{t("Completed Modules")}</span>
+                            <span className="text-base text-gray-500">{viewedCount}/{totalMods}</span>
                           </div>
-                          <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded whitespace-nowrap">{d.tag}</span>
+                          <div className="progress-bar h-2.5">
+                            <div className="progress-fill bg-green-500" style={{ width: `${pct}%`, transition: "width 0.8s ease" }} />
+                          </div>
                         </div>
-                      ))}
-                      {deadlinesExpanded && (
-                        <>
-                          {[
-                            { title: "English Literature Essay", date: "June 2, 2026", tag: "Essay", color: "bg-pink-100 text-pink-600", icon: "fa-book" },
-                            { title: "Scientific Literacy Lab Report", date: "June 5, 2026", tag: "Lab", color: "bg-teal-100 text-teal-600", icon: "fa-flask" },
-                            { title: "Group Project Presentation", date: "June 10, 2026", tag: "Group", color: "bg-orange-100 text-orange-600", icon: "fa-users" },
-                            { title: "Life & Career Skills Final Paper", date: "June 15, 2026", tag: "Final", color: "bg-red-100 text-red-600", icon: "fa-file-alt" },
-                            { title: "Mathematical Reasoning Final Exam", date: "June 20, 2026", tag: "Exam", color: "bg-indigo-100 text-indigo-600", icon: "fa-chalkboard-teacher" }
-                          ].map((d) => (
-                            <div key={d.title} className="deadline-item">
-                              <div className="flex items-start gap-3">
-                                <div className={`w-9 h-9 rounded-lg ${d.color} flex items-center justify-center flex-shrink-0`}>
-                                  <i className={`fas ${d.icon} text-sm`} />
-                                </div>
-                                <div>
-                                  <p className="font-medium text-gray-800 text-sm">{d.title}</p>
-                                  <p className="text-xs text-gray-400 mt-0.5">{d.date}</p>
-                                </div>
-                              </div>
-                              <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded whitespace-nowrap">{d.tag}</span>
-                            </div>
-                          ))}
-                        </>
-                      )}
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-base font-medium text-gray-700">{t("Remaining Modules")}</span>
+                            <span className="text-base text-gray-500">{remaining}/{totalMods}</span>
+                          </div>
+                          <div className="progress-bar h-2.5">
+                            <div className="progress-fill bg-green-300" style={{ width: `${remaining > 0 ? (remaining / totalMods) * 100 : 0}%`, transition: "width 0.8s ease" }} />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm pt-2">
+                          <span className={`w-2 h-2 rounded-full ${pct >= 100 ? "bg-green-500" : "bg-blue-500"}`} />
+                          <span className={`font-medium ${pct >= 100 ? "text-green-600" : "text-blue-600"}`}>{pct >= 100 ? t("All Complete!") : t("In Progress")}</span>
+                          {pct < 100 && (
+                            <><span className="text-gray-300">•</span><span className="text-gray-400">{remaining} {t("module" + (remaining !== 1 ? "s" : ""))} remaining</span></>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="mt-3 pt-3 border-t border-gray-100">
-                      <button onClick={() => setDeadlinesExpanded((p) => !p)}
-                        className="w-full text-sm font-medium text-primary hover:text-primary-700 flex items-center justify-center gap-1">
-                        <span>{deadlinesExpanded ? t("Show Less") : t("View All Deadlines")}</span>
-                        <i className={`fas fa-arrow-${deadlinesExpanded ? "up" : "right"} text-xs`} />
+
+                    <div className="flex justify-center mt-4">
+                      <button onClick={() => setProgressExpanded((p) => !p)}
+                        className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition">
+                        <i className={`fas fa-chevron-down text-gray-500 text-sm transition-transform duration-300 ${progressExpanded ? "rotate-180" : ""}`} />
                       </button>
                     </div>
+
+                    <div className="overflow-hidden transition-all duration-500 ease-in-out"
+                      style={{ maxHeight: progressExpanded ? "2000px" : "0", opacity: progressExpanded ? 1 : 0 }}>
+                      <div className="mt-4 pt-4 border-t border-gray-200">
+                        {completedResources.length > 0 ? (
+                          <>
+                            <p className="text-sm font-semibold text-gray-700 mb-3">{t(`Completed Courses (${completedResources.length})`)}</p>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              {completedResources.map((r, idx) => {
+                                const badge = getBadge(r.subject)
+                                const iconInfo = getSubjectIcon(r.subject)
+                                const mods = r.modules || []
+                                const taskCount = mods.reduce((sum, m) => sum + (m.tasks?.length || 0), 0)
+                                return (
+                                <div key={r.id} className="relative rounded-xl border border-gray-200 bg-white shadow-sm group hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+                                  style={{ animation: `slideUp 0.4s ease-out ${idx * 0.05}s both` }}>
+                                    <div className="p-4">
+                                      <div className="flex items-start gap-3">
+                                        <div className={`w-11 h-11 rounded-xl ${iconInfo.bg} ${iconInfo.color} flex items-center justify-center shrink-0 shadow-sm`}>
+                                          <i className={`fas ${iconInfo.icon} text-base`} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="font-semibold text-gray-800 text-sm leading-tight truncate">{r.title}</p>
+                                          <div className="flex items-center gap-2 mt-1.5">
+                                            <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{mods.length} module{mods.length !== 1 ? "s" : ""}</span>
+                                            <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{taskCount} task{taskCount !== 1 ? "s" : ""}</span>
+                                          </div>
+                                          <div className="flex items-center gap-1 mt-2">
+                                            <span className="text-[10px] font-medium text-green-600 bg-green-100 px-1.5 py-0.5 rounded-full flex items-center gap-1">
+                                              <i className="fas fa-check-circle text-[8px]" /> Completed
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="flex flex-col items-center gap-1 shrink-0">
+                                          <div className="relative"
+                                            style={{ animation: `badgePop 0.6s cubic-bezier(0.34,1.56,0.64,1) ${idx * 0.05 + 0.2}s both` }}>
+                                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-300 to-orange-400 flex items-center justify-center shadow-lg shadow-orange-200/50 group-hover:animate-gentlePulse transition-all duration-300 group-hover:shadow-xl group-hover:shadow-orange-300/50 group-hover:-translate-y-0.5">
+                                              <span className="text-xl drop-shadow-sm">{badge}</span>
+                                            </div>
+                                            <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-white flex items-center justify-center shadow-sm">
+                                              <i className="fas fa-star text-[8px] text-amber-400" />
+                                            </div>
+                                          </div>
+                                          <span className={`text-[8px] font-bold uppercase tracking-wider ${iconInfo.color}`}>{r.subject}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-center py-6">
+                            <p className="text-sm text-gray-400">No modules completed yet. Start exploring!</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )
+              })()}
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0">
+                {(() => {
+                  const activeRes = resources
+                    .map(r => ({
+                      resource: r,
+                      viewed: progressMap[r.id] || [],
+                      total: r.modules?.length || 0,
+                    }))
+                    .filter(r => r.viewed.length > 0 && r.viewed.length < r.total)
+                  const colorCycle = [
+                    { color: "bg-navy-500", labelColor: "text-navy-600", bg: "bg-navy-100" },
+                    { color: "bg-amber-500", labelColor: "text-amber-600", bg: "bg-amber-100" },
+                    { color: "bg-purple-500", labelColor: "text-purple-600", bg: "bg-purple-100" },
+                    { color: "bg-emerald-500", labelColor: "text-emerald-600", bg: "bg-emerald-100" },
+                  ]
+                  const firstUnviewedIdx = (r: typeof activeRes[number]) => {
+                    for (let i = 0; i < r.total; i++) {
+                      if (!r.viewed.includes(i)) return i
+                    }
+                    return 0
+                  }
+                  return (
+                    <div className="lg:col-span-2 flex flex-col min-h-0">
+                      <h3 className="text-lg font-bold text-gray-800 mb-4">{t("My Active Modules")}</h3>
+                      {activeRes.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-center py-10 rounded-xl border-2 border-dashed border-gray-200">
+                          <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                            <i className="fas fa-book-open text-gray-300 text-2xl" />
+                          </div>
+                          <p className="font-medium text-gray-500">{t("No active modules")}</p>
+                          <p className="text-xs text-gray-400 mt-1">{t("Start a module from My Modules page")}</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
+                          {activeRes.map((r, i) => {
+                            const c = colorCycle[i % colorCycle.length]
+                            const pct = Math.round((r.viewed.length / r.total) * 100)
+                            const currentMod = r.resource.modules[r.viewed.length] || r.resource.modules[r.total - 1]
+                            return (
+                              <div key={r.resource.id} className="module-card p-5 flex flex-col">
+                                <div className="flex-1">
+                                  <div className="flex items-start justify-between mb-3">
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <h4 className="font-semibold text-gray-800 text-lg">{r.resource.title}</h4>
+                                        <span className={`text-sm font-medium ${c.labelColor} ${c.bg} px-2.5 py-0.5 rounded`}>{pct}%</span>
+                                      </div>
+                                      <p className="text-base text-gray-400">{t("Current:")} {currentMod?.name || `Module ${r.viewed.length + 1}`}</p>
+                                    </div>
+                                  </div>
+                                  <div className="progress-bar mb-4 h-2.5">
+                                    <div className={`progress-fill ${c.color}`} style={{ width: `${pct}%` }} />
+                                  </div>
+                                </div>
+                                <button onClick={() => {
+                                  const idx = firstUnviewedIdx(r)
+                                  setViewContent({ resource: r.resource, moduleIdx: idx })
+                                  goTo("modules")
+                                }} className="w-full py-2.5 bg-navy-400 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 hover:bg-navy-500 transition">
+                                  {t("Continue Lesson")} <i className="fas fa-arrow-right text-xs" />
+                                </button>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+
+                {(() => {
+                  const allDeadlines = resources.flatMap(r =>
+                    (r.modules || []).flatMap((m, mi) =>
+                      (m.tasks || []).filter(t => t.dueDate).map(t => ({
+                        title: t.title,
+                        date: t.dueDate,
+                        tag: t.type.charAt(0).toUpperCase() + t.type.slice(1),
+                        resourceName: r.title,
+                        moduleName: m.name || `Module ${mi + 1}`,
+                        icon: t.type === "quiz" ? "fa-pen-alt" : t.type === "assignment" ? "fa-book-open" : t.type === "discussion" ? "fa-comments" : "fa-newspaper",
+                      }))
+                    )
+                  ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                  const showAll = deadlinesExpanded
+                  const visibleDeadlines = showAll ? allDeadlines : allDeadlines.slice(0, 3)
+                  const tagColors: Record<string, string> = {
+                    Quiz: "bg-blue-100 text-blue-600",
+                    Assignment: "bg-purple-100 text-purple-600",
+                    Discussion: "bg-amber-100 text-amber-600",
+                    Material: "bg-gray-100 text-gray-600",
+                  }
+                  return (
+                    <div className="flex flex-col">
+                      <h3 className="text-lg font-bold text-gray-800 mb-4">{t("Upcoming Deadlines")}</h3>
+                      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm flex flex-col" style={{ flex: deadlinesExpanded ? "1" : undefined }}>
+                        <div className="space-y-0" style={{ flex: deadlinesExpanded ? "1" : undefined }}>
+                          {allDeadlines.length === 0 ? (
+                            <div className="text-center py-8">
+                              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-2">
+                                <i className="fas fa-calendar-check text-gray-300 text-lg" />
+                              </div>
+                              <p className="text-sm text-gray-400">No upcoming deadlines</p>
+                            </div>
+                          ) : (
+                            visibleDeadlines.map((d, i) => (
+                              <div key={i} className="deadline-item">
+                                <div className="flex items-start gap-3">
+                                  <div className={`w-9 h-9 rounded-lg ${tagColors[d.tag] || "bg-gray-100 text-gray-600"} flex items-center justify-center flex-shrink-0`}>
+                                    <i className={`fas ${d.icon} text-sm`} />
+                                  </div>
+                                  <div>
+                                    <p className="font-medium text-gray-800 text-sm">{d.title}</p>
+                                    <p className="text-xs text-gray-400 mt-0.5">{new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
+                                  </div>
+                                </div>
+                                <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded whitespace-nowrap">{d.tag}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        {allDeadlines.length > 3 && (
+                          <div className="mt-3 pt-3 border-t border-gray-100">
+                            <button onClick={() => setDeadlinesExpanded((p) => !p)}
+                              className="w-full text-sm font-medium text-primary hover:text-primary-700 flex items-center justify-center gap-1">
+                              <span>{deadlinesExpanded ? t("Show Less") : t("View All Deadlines")}</span>
+                              <i className={`fas fa-arrow-${deadlinesExpanded ? "up" : "right"} text-xs`} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
 
               {/* Recommended for You */}
