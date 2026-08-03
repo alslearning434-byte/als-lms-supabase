@@ -445,6 +445,18 @@ export default function Teacher() {
     }
   }
 
+  const copyResource = async (r: Resource) => {
+    try {
+      const cloned = JSON.parse(JSON.stringify({ ...r }))
+      delete cloned.id
+      cloned.title = cloned.title + " (copy)"
+      cloned.uploadedAt = new Date().toISOString()
+      const docRef = await addDoc(collection(db, "resources"), cloned)
+      setResources((prev) => [...prev, { ...cloned, id: docRef.id }])
+    } catch (err) {
+      console.error("Failed to copy resource:", err)
+    }
+  }
 
   const goTo = (page: string) => {
     setActivePage(page)
@@ -1060,6 +1072,9 @@ export default function Teacher() {
                           </button>
                           <button onClick={() => openEditResource(r)} className={`flex-1 py-2 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5 ${isDark ? "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20" : "bg-amber-50 text-amber-600 hover:bg-amber-100"}`}>
                             <i className="fas fa-edit" /> Edit
+                          </button>
+                          <button onClick={() => copyResource(r)} className={`py-2 px-2.5 rounded-xl text-xs font-semibold transition flex items-center justify-center ${isDark ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/20" : "bg-blue-50 text-blue-500 hover:bg-blue-100"}`}>
+                            <i className="fas fa-copy" />
                           </button>
                           <button onClick={() => setDeletingResourceId(r.id)} className={`py-2 px-2.5 rounded-xl text-xs font-semibold transition flex items-center justify-center ${isDark ? "bg-red-500/10 text-red-400 hover:bg-red-500/20" : "bg-red-50 text-red-500 hover:bg-red-100"}`}>
                             <i className="fas fa-trash-alt" />

@@ -9,7 +9,7 @@ import AssessmentTaker from "../components/AssessmentTaker"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
 import { db } from "../firebase"
-import { collection, getDocs, doc, getDoc, setDoc, serverTimestamp, query, where } from "firebase/firestore"
+import { collection, getDocs, doc, getDoc, setDoc, addDoc, serverTimestamp, query, where } from "firebase/firestore"
 import type { NavItem, Resource, ModuleTask } from "../types"
 import { getSubjectIcon } from "../utils/subjectIcons"
 import ImageCarousel from "../components/ImageCarousel"
@@ -47,6 +47,8 @@ export default function Student() {
   const [submittedIds, setSubmittedIds] = useState<Set<string>>(new Set(["sci-lab-report"]))
   const [submissionFile, setSubmissionFile] = useState<File | null>(null)
   const [submissionNote, setSubmissionNote] = useState("")
+  const [taskFile, setTaskFile] = useState<File | null>(null)
+  const [taskNote, setTaskNote] = useState("")
   const [resources, setResources] = useState<Resource[]>([])
   const [modalResource, setModalResource] = useState<Resource | null>(null)
   const [viewContent, setViewContent] = useState<{ resource: Resource; moduleIdx: number } | null>(null)
@@ -59,6 +61,8 @@ export default function Student() {
   const [activeModuleTask, setActiveModuleTask] = useState<{ resource: Resource; moduleIdx: number; task: ModuleTask } | null>(null)
   const [remediationTarget, setRemediationTarget] = useState<{ resource: Resource; moduleIdx: number } | null>(null)
   const [accelMsg, setAccelMsg] = useState<string | null>(null)
+  const [assignmentSubs, setAssignmentSubs] = useState<Record<string, { fileName: string; note: string; submittedAt: string }>>({})
+  const [updatingSubKey, setUpdatingSubKey] = useState<string | null>(null)
   const [leaderboardData, setLeaderboardData] = useState<{ classRanks: LeaderboardEntry[]; batchRanks: LeaderboardEntry[] }>({ classRanks: [], batchRanks: [] })
   const [leaderboardLoading, setLeaderboardLoading] = useState(true)
   const [classPage, setClassPage] = useState(1)
@@ -79,6 +83,9 @@ export default function Student() {
       "My Active Modules": "Aktibo Kong Modyul",
       "Current:": "Kasalukuyang:",
       "Continue Lesson": "Ipagpatuloy ang Aralin",
+      "of": "sa",
+      "modules": "modyul",
+      "complete": "kumpleto",
       "Upcoming Deadlines": "Mga Paparating na Deadline",
       "View All Deadlines": "Tingnan Lahat ng Deadline",
       "Show Less": "Ipakita ang Mas Kaunti",
@@ -310,6 +317,18 @@ export default function Student() {
               }
             })
             setQuizSubmissions(qsubs)
+          } catch { /* offline */ }
+          try {
+            const aSnap = await getDocs(collection(db, "assignmentSubmissions"))
+            const asubs: Record<string, { fileName: string; note: string; submittedAt: string }> = {}
+            aSnap.docs.forEach((d) => {
+              const data = d.data()
+              if (data.studentId === user.uid) {
+                const key = `${data.resourceId}_${data.moduleIdx}_${data.taskId}`
+                asubs[key] = { fileName: data.fileName || "", note: data.note || "", submittedAt: data.submittedAt || "" }
+              }
+            })
+            setAssignmentSubs(asubs)
           } catch { /* offline */ }
         }
       } catch (err) {
@@ -675,30 +694,39 @@ export default function Student() {
                               const c = colorCycle[i % colorCycle.length]
                               const pct = Math.round((r.viewed.length / r.total) * 100)
                               const currentMod = r.resource.modules[r.viewed.length] || r.resource.modules[r.total - 1]
+                              const subjIcon = getSubjectIcon(r.resource.subject)
                               return (
                                 <div key={r.resource.id} className="flex-shrink-0 w-72" style={{ scrollSnapAlign: "start" }}>
-                                  <div className="module-card p-5 flex flex-col h-full">
-                                    <div className="flex-1">
-                                      <div className="flex items-start justify-between mb-3">
+                                  <div className="module-card p-0 flex flex-col h-full overflow-hidden !border-0">
+                                    <div className="p-5 flex flex-col flex-1">
+                                      <div className="flex items-start gap-3 mb-3">
+                                        <div className={`w-11 h-11 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0 shadow-sm`}>
+                                          <i className={`fas ${subjIcon.icon} text-base`} />
+                                        </div>
                                         <div className="flex-1 min-w-0">
-                                          <div className="flex items-center gap-2 mb-1">
-                                            <h4 className="font-semibold text-gray-800 text-lg truncate">{r.resource.title}</h4>
-                                            <span className={`text-sm font-medium ${c.labelColor} ${c.bg} px-2.5 py-0.5 rounded whitespace-nowrap`}>{pct}%</span>
-                                          </div>
-                                          <p className="text-base text-gray-400 truncate">{t("Current:")} {currentMod?.name || `Module ${r.viewed.length + 1}`}</p>
+                                          <p className={`text-[10px] font-bold uppercase tracking-wider ${subjIcon.color}`}>{r.resource.subject}</p>
+                                          <h4 className="font-semibold text-gray-800 text-base leading-tight truncate">{r.resource.title}</h4>
+                                        </div>
+                                        <span className={`text-xs font-bold ${c.labelColor} ${c.bg} px-2 py-0.5 rounded whitespace-nowrap`}>{pct}%</span>
+                                      </div>
+                                      <p className="text-sm text-gray-400 truncate mb-4">{t("Current:")} {currentMod?.name || `Module ${r.viewed.length + 1}`}</p>
+                                      <div className="mt-auto">
+                                        <div className="flex items-center justify-between mb-1.5">
+                                          <span className="text-xs font-medium text-gray-500">{r.viewed.length} {t("of")} {r.total} {t("modules")}</span>
+                                          <span className={`text-xs font-semibold ${c.labelColor}`}>{pct}% {t("complete")}</span>
+                                        </div>
+                                        <div className="progress-bar h-2.5 mb-4">
+                                          <div className={`progress-fill ${c.color}`} style={{ width: `${pct}%` }} />
                                         </div>
                                       </div>
-                                      <div className="progress-bar mb-4 h-2.5">
-                                        <div className={`progress-fill ${c.color}`} style={{ width: `${pct}%` }} />
-                                      </div>
+                                      <button onClick={() => {
+                                        const idx = firstUnviewedIdx(r)
+                                        setViewContent({ resource: r.resource, moduleIdx: idx })
+                                        goTo("modules")
+                                      }} className="w-full py-2.5 bg-navy-400 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 hover:bg-navy-500 transition">
+                                        {t("Continue Lesson")} <i className="fas fa-arrow-right text-xs" />
+                                      </button>
                                     </div>
-                                    <button onClick={() => {
-                                      const idx = firstUnviewedIdx(r)
-                                      setViewContent({ resource: r.resource, moduleIdx: idx })
-                                      goTo("modules")
-                                    }} className="w-full py-2.5 bg-navy-400 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 hover:bg-navy-500 transition">
-                                      {t("Continue Lesson")} <i className="fas fa-arrow-right text-xs" />
-                                    </button>
                                   </div>
                                 </div>
                               )
@@ -834,7 +862,7 @@ export default function Student() {
               <h2 className="text-2xl font-bold text-gray-800">{t("My Modules")}</h2>
               <p className="text-gray-500 mt-1 mb-6">{t("Access your learning materials and lessons")}</p>
               <ModuleModal resource={modalResource} viewedModules={modalResource ? (progressMap[modalResource.id] || []) : []} quizSubmissions={quizSubmissions} onClose={() => setModalResource(null)} onViewContent={(r, idx) => { setModalResource(null); setViewContent({ resource: r, moduleIdx: idx }) }} onToggleUnread={(resourceId, moduleIdx) => markModuleUnread(resourceId, moduleIdx)} t={t} />
-              <ModuleViewer data={viewContent} viewedModules={viewContent ? (progressMap[viewContent.resource.id] || []) : []} onBack={() => { setViewContent(null) }} onNavigate={(idx) => { setViewContent(prev => prev ? { ...prev, moduleIdx: idx } : null) }} onMarkViewed={(resourceId, moduleIdx) => markModuleViewed(resourceId, moduleIdx)} onGoToProgress={(resourceId, moduleIdx) => { setViewContent(null); setCongratsTarget({ resourceId, moduleIdx }); setActivePage("finish-modules") }} user={user} t={t} />
+              <ModuleViewer data={viewContent} viewedModules={viewContent ? (progressMap[viewContent.resource.id] || []) : []} onBack={() => { setViewContent(null) }} onNavigate={(idx) => { setViewContent(prev => prev ? { ...prev, moduleIdx: idx } : null) }} onMarkViewed={(resourceId, moduleIdx) => markModuleViewed(resourceId, moduleIdx)} onGoToProgress={(resourceId, moduleIdx) => { setViewContent(null); setCongratsTarget({ resourceId, moduleIdx }); setActivePage("finish-modules") }} user={user} t={t} quizSubmissions={quizSubmissions} assignmentSubs={assignmentSubs} />
               {resources.length === 0 ? (
                 <div className="text-center py-20 rounded-xl border-2 border-dashed border-gray-200">
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 bg-gray-100">
@@ -929,10 +957,16 @@ export default function Student() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2 mt-4">
-                            {mods.map((_, i) => {
-                              const isDone = viewed.includes(i)
+                            {mods.map((mod, i) => {
+                              const modTasks = mod.tasks || []
+                              const isDone = viewed.includes(i) && modTasks.every(t => {
+                                if (t.type === "quiz") return !!quizSubmissions[`${r.id}_${i}`]?.passed
+                                if (t.type === "assignment") return !!assignmentSubs[`${r.id}_${i}_${t.id}`]
+                                return true
+                              })
+                              const inProgress = viewed.includes(i) && !isDone
                               return (
-                                <div key={i} className={`flex-1 h-2 rounded-full transition-colors ${isDone ? "bg-green-400" : "bg-gray-200"}`} title={`Module ${i + 1}${isDone ? " (done)" : ""}`} />
+                                <div key={i} className={`flex-1 h-2.5 rounded-full transition-colors ${isDone ? "bg-green-400" : inProgress ? "bg-orange-300" : "bg-gray-200"}`} title={`Module ${i + 1}${isDone ? " (done)" : inProgress ? " (in progress)" : ""}`} />
                               )
                             })}
                           </div>
@@ -956,11 +990,16 @@ export default function Student() {
                         const modTasks = (mod.tasks || [])
                         if (modTasks.length === 0) return null
                         const isViewed = viewed.includes(modIdx)
+                        const isComplete = isViewed && modTasks.every(t => {
+                          if (t.type === "quiz") return !!quizSubmissions[`${r.id}_${modIdx}`]?.passed
+                          if (t.type === "assignment") return !!assignmentSubs[`${r.id}_${modIdx}_${t.id}`]
+                          return true
+                        })
                         return (
                           <div key={modIdx} id={`module-tasks-${r.id}-${modIdx}`}>
                             <div className="flex items-center gap-3 mb-3">
-                              <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${isViewed ? "bg-green-500 text-white" : "bg-gray-200 text-gray-400"}`}>
-                                {isViewed ? <i className="fas fa-check" /> : modIdx + 1}
+                              <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${isComplete ? "bg-green-500 text-white" : isViewed ? "bg-orange-50 text-orange-600 border-2 border-dashed border-orange-400" : "bg-gray-200 text-gray-400"}`}>
+                                {isComplete ? <i className="fas fa-check" /> : isViewed ? modIdx + 1 : <i className="fas fa-lock text-[9px]" />}
                               </span>
                               <div className="flex-1 min-w-0">
                                 <p className={`text-sm font-semibold ${isViewed ? "text-navy-700" : "text-gray-400"}`}>{mod.name || `Module ${modIdx + 1}`}</p>
@@ -969,9 +1008,13 @@ export default function Student() {
                                 <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-gray-100 text-gray-400">
                                   <i className="fas fa-lock mr-1" />Locked
                                 </span>
-                              ) : (
+                              ) : isComplete ? (
                                 <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-green-50 text-green-600">
                                   <i className="fas fa-check-circle mr-1" />Completed
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-amber-50 text-amber-600">
+                                  <i className="fas fa-spinner mr-1" />In Progress
                                 </span>
                               )}
                             </div>
@@ -999,6 +1042,10 @@ export default function Student() {
                                       quizSub ? (
                                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${quizSub.passed ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"}`}>
                                           {quizSub.passed ? <><i className="fas fa-check-circle mr-0.5" />Passed</> : <><i className="fas fa-times-circle mr-0.5" />Failed</>}
+                                        </span>
+                                      ) : task.type === "assignment" && assignmentSubs[`${r.id}_${modIdx}_${task.id}`] ? (
+                                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 bg-green-100 text-green-600">
+                                          <i className="fas fa-check-circle mr-0.5" />Submitted
                                         </span>
                                       ) : (
                                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: tcfg.color + "18", color: tcfg.color }}>
@@ -1138,10 +1185,16 @@ export default function Student() {
 
                           {/* Module progress strip */}
                           <div className="flex items-center gap-1 mb-4">
-                            {mods.map((_, i) => {
-                              const isDone = viewed.includes(i)
+                            {mods.map((mod, i) => {
+                              const modTasks = mod.tasks || []
+                              const isDone = viewed.includes(i) && modTasks.every(t => {
+                                if (t.type === "quiz") return !!quizSubmissions[`${r.id}_${i}`]?.passed
+                                if (t.type === "assignment") return !!assignmentSubs[`${r.id}_${i}_${t.id}`]
+                                return true
+                              })
+                              const inProgress = viewed.includes(i) && !isDone
                               return (
-                                <div key={i} className={`flex-1 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold transition-all duration-300 ${isDone ? "bg-green-500 text-white shadow-sm shadow-green-500/30" : "bg-gray-100 text-gray-400"}`} title={`Module ${i + 1}${isDone ? " (done)" : ""}`}>
+                                <div key={i} className={`flex-1 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold transition-all duration-300 ${isDone ? "bg-green-500 text-white shadow-sm shadow-green-500/30" : inProgress ? "bg-orange-50 text-orange-600 border-2 border-dashed border-orange-400" : "bg-gray-100 text-gray-400"}`} title={`Module ${i + 1}${isDone ? " (done)" : inProgress ? " (in progress)" : ""}`}>
                                   {isDone ? <i className="fas fa-check text-[9px]" /> : i + 1}
                                 </div>
                               )
@@ -2040,8 +2093,127 @@ export default function Student() {
                     </div>
                   </div>
                 )}
+                {task.type === "assignment" && (() => {
+                  const subKey = `${r.id}_${moduleIdx}_${task.id}`
+                  const existing = assignmentSubs[subKey]
+                  const isEditing = updatingSubKey === subKey
+                  if (existing && !isEditing) {
+                    return (
+                      <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-2">
+                        <div className="flex items-center gap-2 text-green-700 font-semibold text-sm">
+                          <i className="fas fa-check-circle" /> Submitted
+                        </div>
+                        <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-green-100">
+                          <i className="fas fa-file text-green-500" />
+                          <span className="text-sm text-gray-700 font-medium truncate flex-1">{existing.fileName}</span>
+                          <span className="text-xs text-gray-400">{existing.submittedAt ? new Date(existing.submittedAt).toLocaleDateString() : ""}</span>
+                        </div>
+                        {existing.note && (
+                          <div className="bg-white rounded-lg border border-green-100 p-3">
+                            <p className="text-xs text-gray-500 mb-1">Notes</p>
+                            <p className="text-sm text-gray-700">{existing.note}</p>
+                          </div>
+                        )}
+                        <button onClick={() => { setUpdatingSubKey(subKey); setTaskFile(null); setTaskNote(existing.note || "") }}
+                          className="w-full mt-1 py-2 text-sm font-medium rounded-lg border border-green-300 text-green-700 hover:bg-green-100 transition flex items-center justify-center gap-2">
+                          <i className="fas fa-exchange-alt text-xs" /> Change File
+                        </button>
+                      </div>
+                    )
+                  }
+                  return (
+                    <>
+                      {isEditing && (
+                        <div className="flex items-center gap-2 text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm font-medium">
+                          <i className="fas fa-pencil-alt text-xs" /> Updating submission — upload a new file to replace the old one
+                        </div>
+                      )}
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Attach file</label>
+                        <div className="border-2 border-dashed border-gray-200 rounded-xl p-5 text-center hover:border-navy-400 transition cursor-pointer"
+                          onClick={() => document.getElementById("task-file-input")?.click()}>
+                          {taskFile ? (
+                            <div className="flex items-center justify-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-navy-100 text-navy-600 flex items-center justify-center">
+                                <i className="fas fa-file text-lg" />
+                              </div>
+                              <div className="text-left">
+                                <p className="text-sm font-medium text-gray-700">{taskFile.name}</p>
+                                <p className="text-xs text-gray-400">{(taskFile.size / 1024).toFixed(1)} KB</p>
+                              </div>
+                              <button onClick={(e) => { e.stopPropagation(); setTaskFile(null) }}
+                                className="text-xs text-red-500 hover:text-red-600 ml-2">Remove</button>
+                            </div>
+                          ) : (
+                            <div>
+                              <i className="fas fa-cloud-upload-alt text-3xl text-gray-300 mb-2" />
+                              <p className="text-sm text-gray-500">{isEditing ? "Choose a new file" : "Choose File"}</p>
+                              <p className="text-xs text-gray-400 mt-1">PDF, DOC, DOCX, or image files</p>
+                            </div>
+                          )}
+                        </div>
+                        <input id="task-file-input" type="file" className="hidden"
+                          onChange={(e) => { if (e.target.files?.[0]) setTaskFile(e.target.files[0]) }} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Add notes</label>
+                        <textarea value={taskNote} onChange={(e) => setTaskNote(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500 resize-none"
+                          rows={3} placeholder="Add notes" />
+                      </div>
+                    </>
+                  )
+                })()}
               </div>
               <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
+                {task.type === "assignment" && (() => {
+                  const subKey = `${r.id}_${moduleIdx}_${task.id}`
+                  const existing = assignmentSubs[subKey]
+                  const isEditing = updatingSubKey === subKey
+                  if (existing && !isEditing) {
+                    return (
+                      <button onClick={() => { setUpdatingSubKey(subKey); setTaskFile(null); setTaskNote(existing.note || "") }}
+                        className="px-5 py-2 border border-navy-200 text-navy-600 text-sm font-medium rounded-lg hover:bg-navy-50 transition flex items-center gap-2">
+                        <i className="fas fa-eye text-xs" /> View Submission
+                      </button>
+                    )
+                  }
+                  return (
+                    <>
+                      {isEditing && (
+                        <button onClick={() => { setUpdatingSubKey(null); setTaskFile(null); setTaskNote("") }}
+                          className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition">
+                          Cancel
+                        </button>
+                      )}
+                      <button onClick={async () => {
+                        if (!taskFile) return
+                        try {
+                          const docId = `${user?.uid}_${r.id}_${moduleIdx}_${task.id}`
+                          await setDoc(doc(db, "assignmentSubmissions", docId), {
+                            studentId: user?.uid || "",
+                            resourceId: r.id,
+                            moduleIdx,
+                            taskId: task.id,
+                            fileName: taskFile.name,
+                            note: taskNote,
+                            submittedAt: new Date().toISOString(),
+                          })
+                          setAssignmentSubs(prev => ({ ...prev, [subKey]: { fileName: taskFile.name, note: taskNote, submittedAt: new Date().toISOString() } }))
+                          setTaskFile(null)
+                          setTaskNote("")
+                          setUpdatingSubKey(null)
+                        } catch (e) {
+                          console.error("Failed to submit assignment:", e)
+                        }
+                      }}
+                        className="px-5 py-2 bg-navy-500 text-white text-sm font-medium rounded-lg hover:bg-navy-600 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={!taskFile}>
+                        <i className="fas fa-paper-plane text-xs" /> {isEditing ? "Update Submission" : "Submit"}
+                      </button>
+                    </>
+                  )
+                })()}
                 <button onClick={() => setActiveModuleTask(null)} className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition">
                   Close
                 </button>
@@ -2313,7 +2485,7 @@ function ModuleModal({ resource, viewedModules, quizSubmissions, onClose, onView
   )
 }
 
-function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, onGoToProgress, user, t }: {
+function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, onGoToProgress, user, t, quizSubmissions, assignmentSubs }: {
   data: { resource: Resource; moduleIdx: number } | null
   viewedModules: number[]
   onBack: () => void
@@ -2322,6 +2494,8 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
   onGoToProgress: (resourceId: string, moduleIdx: number) => void
   user: { uid: string; displayName?: string | null; email?: string | null } | null
   t: (text: string) => string
+  quizSubmissions: Record<string, { score: number; total: number; passed: boolean }>
+  assignmentSubs: Record<string, { fileName: string; note: string; submittedAt: string }>
 }) {
   const [confirmNav, setConfirmNav] = useState<null | { target: number | "back" }>(null)
   const [congratsState, setCongratsState] = useState<{ resourceId: string; moduleIdx: number; moduleName: string } | null>(null)
@@ -2335,6 +2509,16 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
   const totalBlocks = (mod.blocks || []).length
   const blockTypeCounts = { content: 0, image: 0, table: 0 }
   ;(mod.blocks || []).forEach(b => { if (b.type in blockTypeCounts) blockTypeCounts[b.type as keyof typeof blockTypeCounts]++ })
+
+  const areTasksComplete = (resource: Resource, moduleIdx: number): boolean => {
+    const m = resource.modules?.[moduleIdx]
+    if (!m || !m.tasks || m.tasks.length === 0) return true
+    return m.tasks.every(t => {
+      if (t.type === "quiz") return !!quizSubmissions[`${resource.id}_${moduleIdx}`]?.passed
+      if (t.type === "assignment") return !!assignmentSubs[`${resource.id}_${moduleIdx}_${t.id}`]
+      return true
+    })
+  }
 
   const handleConfirmMarkRead = () => {
     const navTarget = confirmNav ? confirmNav.target : null
@@ -2509,25 +2693,40 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
           )}
 
           {/* Module navigation */}
-          <div className="flex items-center justify-between mt-10 pt-6 border-t border-gray-200">
-            <button
-              disabled={data.moduleIdx === 0}
-              onClick={() => viewedModules.includes(data.moduleIdx) ? onNavigate(data.moduleIdx - 1) : setConfirmNav({ target: data.moduleIdx - 1 })}
-              className="px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              <i className="fas fa-chevron-left text-xs" />{t("Previous Module")}
-            </button>
-            <span className="text-xs text-gray-400">
-              {data.moduleIdx + 1} / {mods.length}
-            </span>
-            <button
-              disabled={data.moduleIdx === mods.length - 1}
-              onClick={() => viewedModules.includes(data.moduleIdx) ? onNavigate(data.moduleIdx + 1) : setConfirmNav({ target: data.moduleIdx + 1 })}
-              className="px-4 py-2.5 text-sm font-medium text-white bg-navy-500 rounded-xl hover:bg-navy-600 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {t("Next Module")}<i className="fas fa-chevron-right text-xs" />
-            </button>
-          </div>
+          {(() => {
+            const tasksIncomplete = !areTasksComplete(data.resource, data.moduleIdx)
+            const isOnLast = data.moduleIdx === mods.length - 1
+            const nextDisabled = isOnLast || (viewedModules.includes(data.moduleIdx) && tasksIncomplete)
+            return (
+            <div className="flex items-center justify-between mt-10 pt-6 border-t border-gray-200">
+              <button
+                disabled={data.moduleIdx === 0}
+                onClick={() => viewedModules.includes(data.moduleIdx) ? onNavigate(data.moduleIdx - 1) : setConfirmNav({ target: data.moduleIdx - 1 })}
+                className="px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <i className="fas fa-chevron-left text-xs" />{t("Previous Module")}
+              </button>
+              <span className="text-xs text-gray-400">
+                {data.moduleIdx + 1} / {mods.length}
+              </span>
+              <div className="relative group">
+                <button
+                  disabled={nextDisabled}
+                  onClick={() => viewedModules.includes(data.moduleIdx) ? onNavigate(data.moduleIdx + 1) : setConfirmNav({ target: data.moduleIdx + 1 })}
+                  className="px-4 py-2.5 text-sm font-medium text-white bg-navy-500 rounded-xl hover:bg-navy-600 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {t("Next Module")}<i className="fas fa-chevron-right text-xs" />
+                </button>
+                {viewedModules.includes(data.moduleIdx) && tasksIncomplete && !isOnLast && (
+                  <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-gray-800 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none shadow-lg">
+                    Complete all tasks first
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800" />
+                  </div>
+                )}
+              </div>
+            </div>
+            )
+          })()}
         </div>
       </div>
 
@@ -2558,8 +2757,15 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
               <div className="w-20 h-20 rounded-full bg-gradient-to-br from-amber-100 to-amber-200 flex items-center justify-center mx-auto mb-5" style={{ animation: "bounceIn 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards" }}>
                 <i className="fas fa-trophy text-3xl text-amber-500" />
               </div>
-              <h3 className="text-xl font-bold text-gray-800 mb-1">Amazing Work!</h3>
-              <p className="text-sm text-gray-500 mb-1">You've completed <span className="font-semibold text-navy-600">{congratsState.moduleName}</span></p>
+              <h3 className="text-xl font-bold text-gray-800 mb-1">{(() => {
+                const tc = (mods[congratsState.moduleIdx]?.tasks || []).length
+                return tc > 0 ? "Well Done!" : "Amazing Work!"
+              })()}</h3>
+              <p className="text-sm text-gray-500 mb-1">{(() => {
+                const tc = (mods[congratsState.moduleIdx]?.tasks || []).length
+                const label = tc > 0 ? "You've finished reading" : "You've completed"
+                return <>{label} <span className="font-semibold text-navy-600">{congratsState.moduleName}</span></>
+              })()}</p>
               {(() => {
                 const taskCount = (mods[congratsState.moduleIdx]?.tasks || []).length
                 return taskCount > 0 ? (
@@ -2576,16 +2782,31 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
             <div className="px-6 pb-6 space-y-2.5">
               {(() => {
                 const taskCount = (mods[congratsState.moduleIdx]?.tasks || []).length
-                return taskCount > 0 ? (
-                  <button onClick={handleCongratsViewTasks}
-                    className="w-full py-3 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center justify-center gap-2 shadow-sm shadow-navy-500/20">
-                    <i className="fas fa-list-check text-xs" />View Tasks
-                  </button>
-                ) : (
-                  <button onClick={handleCongratsContinue}
-                    className="w-full py-3 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition flex items-center justify-center gap-2">
-                    {data.moduleIdx + 1 < mods.length ? <><i className="fas fa-arrow-right text-xs" />Continue to Next Module</> : <><i className="fas fa-arrow-left text-xs" />Back to Modules</>}
-                  </button>
+                const hasNext = data.moduleIdx + 1 < mods.length
+                const tasksComplete = areTasksComplete(data.resource, congratsState.moduleIdx)
+                return (
+                  <>
+                    {taskCount > 0 && (
+                      <button onClick={handleCongratsViewTasks}
+                        className="w-full py-3 bg-navy-500 text-white text-sm font-semibold rounded-xl hover:bg-navy-600 transition flex items-center justify-center gap-2 shadow-sm shadow-navy-500/20">
+                        <i className="fas fa-list-check text-xs" />View Tasks
+                      </button>
+                    )}
+                    {hasNext && tasksComplete ? (
+                      <button onClick={handleCongratsContinue}
+                        className={`w-full py-3 text-sm font-semibold rounded-xl transition flex items-center justify-center gap-2 ${taskCount > 0 ? "border border-gray-200 text-gray-600 hover:bg-gray-50" : "bg-navy-500 text-white hover:bg-navy-600 shadow-sm shadow-navy-500/20"}`}>
+                        <i className="fas fa-arrow-right text-xs" />Continue to Next Module
+                      </button>
+                    ) : (
+                      <button onClick={onBack}
+                        className="w-full py-3 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition flex items-center justify-center gap-2">
+                        <i className="fas fa-arrow-left text-xs" />Back to Modules
+                      </button>
+                    )}
+                    {hasNext && !tasksComplete && taskCount > 0 && (
+                      <p className="text-center text-xs text-amber-600 font-medium">Complete all tasks to unlock the next module</p>
+                    )}
+                  </>
                 )
               })()}
             </div>
