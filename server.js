@@ -3,19 +3,244 @@ config({ path: ".env.local" })
 import express from "express"
 import multer from "multer"
 import cors from "cors"
+import os from "os"
+import { readdirSync, statSync } from "fs"
+import { mkdir, readFile, readdir, unlink, writeFile, rm } from "fs/promises"
 import { fileURLToPath } from "url"
-import { dirname, join, extname } from "path"
+import { dirname, join, extname, basename } from "path"
+import PocketBase from "pocketbase"
+import { createGzip, createGunzip } from "zlib"
+import { pipeline } from "stream/promises"
+import { Readable } from "stream"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 const app = express()
-const PORT = 3001
+const PORT = process.env.PORT || 3001
 
 app.use(cors())
 app.use(express.json({ limit: "5mb" }))
 
+// Debug middleware - log all requests
+app.use((req, res, next) => {
+  console.log(`[REQUEST] ${req.method} ${req.path}`)
+  next()
+})
+
 const GROQ_API_KEY = process.env.GROQ_API_KEY || null
+
+// ── PocketBase (server-side) ──
+
+const PB_URL = process.env.POCKETBASE_URL || "http://127.0.0.1:8090"
+const PB_SUPERUSER_EMAIL = process.env.POCKETBASE_SUPERUSER_EMAIL || "admin@local.test"
+const PB_SUPERUSER_PASSWORD = process.env.POCKETBASE_SUPERUSER_PASSWORD || "admin12345"
+
+const pb = new PocketBase(PB_URL)
+
+let pbAuthPromise = null
+async function ensurePB() {
+  if (pb.authStore.isValid) return
+  if (pbAuthPromise) return pbAuthPromise
+  pbAuthPromise = pb
+    .collection("_superusers")
+    .authWithPassword(PB_SUPERUSER_EMAIL, PB_SUPERUSER_PASSWORD)
+    .then(() => { pbAuthPromise = null })
+    .catch((err) => { pbAuthPromise = null; throw err })
+  return pbAuthPromise
+}
+
+const BACKUP_DIR = join(__dirname, "backups")
+const BACKUP_COLLECTIONS = [
+  "users", "resources", "moduleProgress", "assessmentSubmissions",
+  "quizSubmissions", "assignmentSubmissions", "activities", "backups",
+]
+const BACKUP_HOUR = 17
+const BACKUP_RETENTION_DAYS = 30
+const BACKUP_CHUNK_SIZE_MB = 50
+
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"]
+
+function formatDate(d) {
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+let backupInProgress = false
+let nextBackupAt = null
+
+async function logBackupActivity(action, detail) {
+  try {
+    await ensurePB()
+    await pb.collection("activities").create({
+      status: "Completed",
+      user: "system",
+      action,
+      detail,
+      createdAt: new Date().toISOString(),
+    })
+  } catch { /* activity log is non-critical */ }
+}
+
+async function runBackup(type = "Manual") {
+  if (backupInProgress) throw new Error("A backup is already in progress. Please wait for it to finish.")
+  backupInProgress = true
+  try {
+    await ensurePB()
+    const now = new Date()
+    const backupId = `${now.getTime()}`
+    const collections = {}
+    let docCount = 0
+    for (const name of BACKUP_COLLECTIONS) {
+      const records = await pb.collection(name).getFullList({ requestKey: null })
+      collections[name] = records.map((d) => ({ id: d.id, data: d }))
+      docCount += records.length
+    }
+
+    const uploadsDir = join(__dirname, "uploads")
+    const files = []
+    let uploadBytes = 0
+    try {
+      const entries = await readdir(uploadsDir, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isFile()) continue
+        const content = await readFile(join(uploadsDir, entry.name))
+        files.push({
+          name: entry.name,
+          size: content.length,
+          mimeType: "application/octet-stream",
+          content: content.toString("base64"),
+        })
+        uploadBytes += content.length
+      }
+    } catch { /* uploads dir may not exist yet */ }
+
+    const artifact = {
+      backupId,
+      type,
+      createdAt: now.toISOString(),
+      collections,
+      uploads: files,
+      stats: { docCount, uploadBytes, fileCount: files.length },
+    }
+
+    await mkdir(BACKUP_DIR, { recursive: true })
+    const fileName = `${backupId}.json.gz`
+    const filePath = join(BACKUP_DIR, fileName)
+    const artifactJson = JSON.stringify(artifact)
+    await pipeline(Readable.from([artifactJson]), createGzip(), writeFile(filePath))
+
+    const artifactBytes = await statSync(filePath).size
+    const record = {
+      date: formatDate(now),
+      time: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      type,
+      size: formatBytes(artifactBytes),
+      bytes: artifactBytes,
+      status: "Completed",
+      createdAt: now.toISOString(),
+      fileId: fileName,
+      docCount,
+      fileCount: files.length,
+    }
+    const ref = await pb.collection("backups").create(record)
+    await logBackupActivity(
+      type === "Manual" ? "Manual Backup" : "Automatic Backup",
+      `Database backup completed (${docCount} docs, ${files.length} files, ${formatBytes(artifactBytes)})`
+    )
+
+    await cleanupOldBackups()
+
+    return { id: ref.id, ...record }
+  } finally {
+    backupInProgress = false
+  }
+}
+
+async function cleanupOldBackups() {
+  const cutoff = Date.now() - BACKUP_RETENTION_DAYS * 24 * 60 * 60 * 1000
+
+  try {
+    const entries = await readdir(BACKUP_DIR, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isFile()) continue
+      if (!entry.name.endsWith(".json.gz")) continue
+      const filePath = join(BACKUP_DIR, entry.name)
+      const stats = await statSync(filePath)
+      if (stats.mtimeMs < cutoff) {
+        await unlink(filePath)
+        console.log(`Deleted old backup: ${entry.name}`)
+      }
+    }
+  } catch (err) {
+    console.error("Local backup cleanup failed:", err.message)
+  }
+
+  try {
+    await ensurePB()
+    const cutoffIso = new Date(cutoff).toISOString()
+    const records = await pb.collection("backups").getFullList({ requestKey: null })
+    let count = 0
+    for (const rec of records) {
+      if (rec.createdAt && rec.createdAt < cutoffIso) {
+        await pb.collection("backups").delete(rec.id)
+        count++
+      }
+    }
+    if (count > 0) {
+      console.log(`Deleted ${count} old backup records from PocketBase`)
+    }
+  } catch (err) {
+    console.error("PocketBase backup cleanup failed:", err.message)
+  }
+}
+
+function scheduleAutomaticBackup() {
+  const now = new Date()
+  const next = new Date(now)
+  next.setHours(BACKUP_HOUR, 0, 0, 0)
+  if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1)
+  nextBackupAt = next.toISOString()
+  setTimeout(async () => {
+    try {
+      await runBackup("Automatic")
+    } catch (err) {
+      console.error("Automatic backup failed:", err.message)
+    }
+    scheduleAutomaticBackup()
+  }, next.getTime() - now.getTime())
+  console.log(`Automatic backup scheduled for ${next.toString()}`)
+}
+
+scheduleAutomaticBackup()
+
+function dirSize(dir) {
+  let total = 0
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name)
+    if (entry.isDirectory()) total += dirSize(p)
+    else total += statSync(p).size
+  }
+  return total
+}
+
+async function getCpuPct() {
+  const start = process.cpuUsage()
+  await new Promise((r) => setTimeout(r, 100))
+  const delta = process.cpuUsage(start)
+  const micros = delta.user + delta.system
+  const cores = os.cpus().length
+  const wallMicros = 100 * 1000
+  return Math.min(100, Math.round((micros / wallMicros / cores) * 100))
+}
+
+const STORAGE_QUOTA = 5 * 1024 * 1024 * 1024
 
 const storage = multer.diskStorage({
   destination: join(__dirname, "uploads"),
@@ -606,6 +831,595 @@ function generateMockQuiz(moduleTitle, subject, contentParts) {
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" })
+})
+
+app.get("/api/test-route", (_req, res) => {
+  console.log("TEST ROUTE HIT!")
+  res.json({ test: "works" })
+})
+
+// ── Database Backup ──
+
+app.post("/api/backups/run", async (_req, res) => {
+  try {
+    const record = await runBackup("Manual")
+    return res.json(record)
+  } catch (err) {
+    const conflict = typeof err.message === "string" && err.message.includes("already in progress")
+    return res.status(conflict ? 409 : 500).json({ error: err.message || "Backup failed" })
+  }
+})
+
+async function getBackupRecord(id) {
+  await ensurePB()
+  try {
+    return await pb.collection("backups").getOne(id)
+  } catch (err) {
+    if (err.status === 404) return null
+    throw err
+  }
+}
+
+app.get("/api/backups/:id/download", async (req, res) => {
+  try {
+    const record = await getBackupRecord(req.params.id)
+    if (!record) return res.status(404).json({ error: "Backup record not found" })
+    const fileName = record.fileId
+    if (!fileName) return res.status(404).json({ error: "No artifact stored for this backup" })
+    const filePath = join(BACKUP_DIR, basename(fileName))
+    try {
+      statSync(filePath)
+    } catch {
+      return res.status(404).json({ error: "Backup artifact file is missing" })
+    }
+    res.setHeader("Content-Type", "application/gzip")
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`)
+    const readStream = Readable.from([await readFile(filePath)])
+    return readStream.pipe(res)
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Download failed" })
+  }
+})
+
+app.get("/api/backups/:id/preview", async (req, res) => {
+  try {
+    const record = await getBackupRecord(req.params.id)
+    if (!record) return res.status(404).json({ error: "Backup record not found" })
+    const fileName = record.fileId
+    if (!fileName) return res.status(404).json({ error: "No artifact stored for this backup" })
+    const filePath = join(BACKUP_DIR, basename(fileName))
+    let raw
+    try {
+      const compressed = await readFile(filePath)
+      const { gunzipSync } = await import("zlib")
+      raw = gunzipSync(compressed).toString("utf-8")
+    } catch {
+      return res.status(404).json({ error: "Backup artifact file is missing" })
+    }
+    const artifact = JSON.parse(raw)
+    return res.json({
+      record: { id: record.id, ...record },
+      artifact: {
+        backupId: artifact.backupId,
+        type: artifact.type,
+        createdAt: artifact.createdAt,
+        stats: artifact.stats,
+        collections: Object.fromEntries(
+          Object.entries(artifact.collections || {}).map(([name, docs]) => [
+            name,
+            { count: (docs || []).length, sample: (docs || []).slice(0, 3) }
+          ])
+        ),
+        uploads: (artifact.uploads || []).map(f => ({ name: f.name, size: f.size, mimeType: f.mimeType }))
+      }
+    })
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Preview failed" })
+  }
+})
+
+app.post("/api/backups/:id/restore", async (req, res) => {
+  try {
+    const record = await getBackupRecord(req.params.id)
+    if (!record) return res.status(404).json({ error: "Backup record not found" })
+    const fileName = record.fileId
+    if (!fileName) return res.status(400).json({ error: "No artifact stored for this backup" })
+    const filePath = join(BACKUP_DIR, basename(fileName))
+    let raw
+    try {
+      const compressed = await readFile(filePath)
+      const { gunzipSync } = await import("zlib")
+      raw = gunzipSync(compressed).toString("utf-8")
+    } catch {
+      return res.status(404).json({ error: "Backup artifact file is missing" })
+    }
+    const artifact = JSON.parse(raw)
+
+    await ensurePB()
+    let restoredDocs = 0
+    let restoredFiles = 0
+    for (const [name, docs] of Object.entries(artifact.collections || {})) {
+      if (name === "users") {
+        // PocketBase auth records cannot be restored without their password hashes;
+        // skip user records during restore (re-seed via migration script instead).
+        continue
+      }
+      for (const entry of docs) {
+        if (!entry || !entry.id || !entry.data) continue
+        try {
+          const data = { ...entry.data }
+          delete data.id
+          delete data.collectionId
+          delete data.collectionName
+          await pb.collection(name).update(entry.id, data)
+          restoredDocs++
+        } catch {
+          try {
+            const data = { ...entry.data }
+            delete data.id
+            delete data.collectionId
+            delete data.collectionName
+            await pb.collection(name).create(data)
+            restoredDocs++
+          } catch { /* record cannot be restored */ }
+        }
+      }
+    }
+
+    for (const f of artifact.uploads || []) {
+      if (!f || !f.name) continue
+      await writeFile(join(__dirname, "uploads", basename(f.name)), Buffer.from(f.content || "", "base64"))
+      restoredFiles++
+    }
+
+    await logBackupActivity("Restore", `Database restored from backup ${req.params.id} (${restoredDocs} docs, ${restoredFiles} files)`)
+    return res.json({ restoredDocs, restoredFiles })
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Restore failed" })
+  }
+})
+
+app.delete("/api/backups/:id", async (req, res) => {
+  try {
+    const record = await getBackupRecord(req.params.id)
+    if (!record) return res.status(404).json({ error: "Backup record not found" })
+    if (record.fileId) {
+      try { await unlink(join(BACKUP_DIR, basename(record.fileId))) } catch { /* already gone */ }
+    }
+    await pb.collection("backups").delete(record.id)
+    await logBackupActivity("Backup Deleted", `Backup from ${record.date} at ${record.time} was removed`)
+    return res.json({ success: true })
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Delete failed" })
+  }
+})
+
+// ── Status & Metrics ──
+
+app.get("/api/status", async (_req, res) => {
+  const uptimeSeconds = Math.floor(process.uptime())
+  let cpu = 0
+  let memory = 0
+  let storage = 0
+  let storageMB = 0
+  try {
+    cpu = await getCpuPct()
+    memory = parseFloat(((process.memoryUsage().rss / os.totalmem()) * 100).toFixed(1))
+    const uploadsDir = join(__dirname, "uploads")
+    if (readdirSync(uploadsDir, { withFileTypes: true }).length) {
+      const bytes = dirSize(uploadsDir)
+      storage = Math.min(100, Math.round((bytes / STORAGE_QUOTA) * 100))
+      storageMB = bytes / (1024 * 1024)
+    }
+  } catch { /* metrics unavailable */ }
+  res.json({
+    status: "Operational",
+    uptimeSeconds,
+    startedAt: new Date(Date.now() - uptimeSeconds * 1000).toISOString(),
+    version: "1.0.0",
+    health: { cpu, memory, storage, storageMB },
+    nextBackupAt,
+  })
+})
+
+// ── Users ──
+
+function toApiUser(rec) {
+  return {
+    id: rec.id,
+    uid: rec.uid || rec.id,
+    displayName: rec.name || "",
+    email: rec.email || "",
+    role: rec.role || "student",
+    lrn: rec.lrn || "",
+    gradeLevel: rec.gradeLevel || "",
+    phone: rec.phone || "",
+    employeeId: rec.employeeId || "",
+    department: rec.department || "",
+    joinDate: rec.joinDate || "",
+  }
+}
+
+async function findUserByUid(uid) {
+  await ensurePB()
+  try {
+    return await pb.collection("users").getOne(uid)
+  } catch {
+    try {
+      return await pb.collection("users").getFirstListItem(pb.filter("uid = {:uid}", { uid }))
+    } catch {
+      return null
+    }
+  }
+}
+
+app.get("/api/user/:uid", async (req, res) => {
+  try {
+    const rec = await findUserByUid(req.params.uid)
+    if (!rec) return res.status(404).json({ error: "User not found" })
+    res.json(toApiUser(rec))
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get("/api/users/search", async (req, res) => {
+  try {
+    const { email } = req.query
+    if (!email) return res.status(400).json({ error: "Email query parameter required" })
+    await ensurePB()
+    const rec = await pb.collection("users").getFirstListItem(pb.filter("email = {:email}", { email: email.toLowerCase() }))
+    res.json(toApiUser(rec))
+  } catch (err) {
+    res.status(err.status === 404 ? 404 : 500).json({ error: "User not found" })
+  }
+})
+
+app.post("/api/user/:uid", async (req, res) => {
+  try {
+    const { uid } = req.params
+    const data = req.body
+    await ensurePB()
+    const existing = await findUserByUid(uid)
+    const payload = {
+      name: data.displayName || data.name || "",
+      email: data.email || "",
+      role: data.role || "student",
+      lrn: data.lrn || "",
+      gradeLevel: data.gradeLevel || "",
+      phone: data.phone || "",
+      employeeId: data.employeeId || "",
+      department: data.department || "",
+      joinDate: data.joinDate || "",
+      uid,
+    }
+    let rec
+    if (existing) {
+      rec = await pb.collection("users").update(existing.id, payload)
+    } else {
+      const password = data.password || `ALS${Math.random().toString(36).slice(2, 10)}`
+      rec = await pb.collection("users").create({ ...payload, password, passwordConfirm: password })
+    }
+    res.json(toApiUser(rec))
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.patch("/api/user/:uid", async (req, res) => {
+  try {
+    const { uid } = req.params
+    const data = req.body
+    await ensurePB()
+    const existing = await findUserByUid(uid)
+    if (!existing) return res.status(404).json({ error: "User not found" })
+    const payload = {}
+    if (data.displayName !== undefined) payload.name = data.displayName
+    if (data.email !== undefined) payload.email = data.email
+    for (const k of ["lrn", "gradeLevel", "phone", "employeeId", "department", "joinDate"]) {
+      if (data[k] !== undefined) payload[k] = data[k]
+    }
+    const rec = await pb.collection("users").update(existing.id, payload)
+    res.json(toApiUser(rec))
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get("/api/users", async (_req, res) => {
+  try {
+    await ensurePB()
+    const records = await pb.collection("users").getFullList({ requestKey: null })
+    res.json(records.map(toApiUser))
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── Collections API ──
+
+app.get("/api/backups", async (_req, res) => {
+  try {
+    await ensurePB()
+    const records = await pb.collection("backups").getFullList({ sort: "-createdAt", requestKey: null })
+    res.json(records.map((d) => ({ id: d.id, ...d })))
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get("/api/activities", async (_req, res) => {
+  try {
+    await ensurePB()
+    const records = await pb.collection("activities").getFullList({ sort: "-createdAt", requestKey: null })
+    res.json(records.map((d) => ({ id: d.id, ...d })))
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get("/api/test-reports", (_req, res) => {
+  console.log("TEST ROUTE HIT!")
+  res.json({ test: "reports route works" })
+})
+
+// ── Reports API ──
+
+function getCohortFromGrade(gradeLevel) {
+  if (!gradeLevel) return null
+  const normalized = String(gradeLevel).toLowerCase()
+  if (normalized.includes("senior") || normalized.includes("grade 11") || normalized.includes("grade 12")) return "shs"
+  if (normalized.includes("junior") || normalized.includes("grade 7") || normalized.includes("grade 8") || normalized.includes("grade 9") || normalized.includes("grade 10")) return "jhs"
+  const grade = parseInt(normalized.replace(/\D/g, ""), 10)
+  if (isNaN(grade)) return null
+  return grade >= 11 ? "shs" : "jhs"
+}
+
+async function getAllResources() {
+  await ensurePB()
+  const records = await pb.collection("resources").getFullList({ requestKey: null })
+  return records.map((d) => ({ id: d.id, ...d }))
+}
+
+async function getAllUsers() {
+  await ensurePB()
+  const records = await pb.collection("users").getFullList({ requestKey: null })
+  return records.map(toApiUser)
+}
+
+function countTasksByType(resources, cohort) {
+  const counts = { assignment: 0, quiz: 0, discussion: 0, material: 0 }
+  resources.forEach((r) => {
+    const resourceCohort = getCohortFromGrade(r.targetGrade) || (r.subject?.toLowerCase().includes("shs") ? "shs" : "jhs")
+    if (cohort && resourceCohort !== cohort) return
+    r.modules?.forEach((m) => {
+      m.tasks?.forEach((t) => {
+        if (counts.hasOwnProperty(t.type)) counts[t.type]++
+      })
+    })
+  })
+  return counts
+}
+
+async function getSubmissionCounts(cohort = null) {
+  await ensurePB()
+  const [assignments, quizzes, assessments, progress] = await Promise.all([
+    pb.collection("assignmentSubmissions").getFullList({ requestKey: null }),
+    pb.collection("quizSubmissions").getFullList({ requestKey: null }),
+    pb.collection("assessmentSubmissions").getFullList({ requestKey: null }),
+    pb.collection("moduleProgress").getFullList({ requestKey: null }),
+  ])
+
+  const discussions = assessments.filter((d) => d.type === "discussion")
+
+  const studentCohorts = {}
+  const users = await getAllUsers()
+  users.forEach((u) => {
+    if (u.role === "student" || !u.role) {
+      studentCohorts[u.uid || u.id] = getCohortFromGrade(u.gradeLevel)
+    }
+  })
+
+  const counts = { assignment: 0, quiz: 0, discussion: 0, material: 0 }
+  const byStudent = {}
+
+  assignments.forEach((data) => {
+    const sc = studentCohorts[data.studentId]
+    if (cohort && sc !== cohort) return
+    counts.assignment++
+    byStudent[data.studentId] = byStudent[data.studentId] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
+    byStudent[data.studentId].assignment++
+  })
+
+  quizzes.forEach((data) => {
+    const sc = studentCohorts[data.studentId]
+    if (cohort && sc !== cohort) return
+    counts.quiz++
+    byStudent[data.studentId] = byStudent[data.studentId] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
+    byStudent[data.studentId].quiz++
+  })
+
+  discussions.forEach((data) => {
+    const sc = studentCohorts[data.studentId]
+    if (cohort && sc !== cohort) return
+    counts.discussion++
+    byStudent[data.studentId] = byStudent[data.studentId] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
+    byStudent[data.studentId].discussion++
+  })
+
+  progress.forEach((data) => {
+    const sc = studentCohorts[data.userId]
+    if (cohort && sc !== cohort) return
+    if (data.progress === 100 || data.completedAt) {
+      counts.material++
+      byStudent[data.userId] = byStudent[data.userId] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
+      byStudent[data.userId].material++
+    }
+  })
+
+  return { counts, byStudent }
+}
+
+app.get("/api/reports/overview", async (req, res) => {
+  try {
+    const cohort = req.query.cohort || null
+    const [resources, users, submissions] = await Promise.all([
+      getAllResources(),
+      getAllUsers(),
+      getSubmissionCounts(cohort),
+    ])
+
+    const students = users.filter((u) => u.role === "student" || !u.role)
+    const filteredStudents = cohort ? students.filter((s) => getCohortFromGrade(s.gradeLevel) === cohort) : students
+    const totalStudents = filteredStudents.length
+
+    const taskCounts = countTasksByType(resources, cohort)
+    const totalTasksAssigned = Object.values(taskCounts).reduce((a, b) => a + b, 0) * totalStudents
+    const totalTasksCompleted = Object.values(submissions.counts).reduce((a, b) => a + b, 0)
+
+    const byType = {}
+    Object.keys(taskCounts).forEach((type) => {
+      const assigned = taskCounts[type] * totalStudents
+      const completed = submissions.counts[type]
+      byType[type] = {
+        assigned,
+        completed,
+        rate: assigned > 0 ? parseFloat(((completed / assigned) * 100).toFixed(1)) : 0,
+      }
+    })
+
+    const jhsStudents = students.filter((s) => getCohortFromGrade(s.gradeLevel) === "jhs")
+    const shsStudents = students.filter((s) => getCohortFromGrade(s.gradeLevel) === "shs")
+
+    const [jhsSubs, shsSubs] = await Promise.all([
+      getSubmissionCounts("jhs"),
+      getSubmissionCounts("shs"),
+    ])
+
+    const jhsTaskCounts = countTasksByType(resources, "jhs")
+    const shsTaskCounts = countTasksByType(resources, "shs")
+
+    const byCohort = {
+      jhs: {
+        students: jhsStudents.length,
+        tasksAssigned: Object.values(jhsTaskCounts).reduce((a, b) => a + b, 0) * jhsStudents.length,
+        tasksCompleted: Object.values(jhsSubs.counts).reduce((a, b) => a + b, 0),
+        rate: 0,
+      },
+      shs: {
+        students: shsStudents.length,
+        tasksAssigned: Object.values(shsTaskCounts).reduce((a, b) => a + b, 0) * shsStudents.length,
+        tasksCompleted: Object.values(shsSubs.counts).reduce((a, b) => a + b, 0),
+        rate: 0,
+      },
+    }
+
+    byCohort.jhs.rate = byCohort.jhs.tasksAssigned > 0 ? parseFloat(((byCohort.jhs.tasksCompleted / byCohort.jhs.tasksAssigned) * 100).toFixed(1)) : 0
+    byCohort.shs.rate = byCohort.shs.tasksAssigned > 0 ? parseFloat(((byCohort.shs.tasksCompleted / byCohort.shs.tasksAssigned) * 100).toFixed(1)) : 0
+
+    const completionRate = totalTasksAssigned > 0 ? parseFloat(((totalTasksCompleted / totalTasksAssigned) * 100).toFixed(1)) : 0
+
+    res.json({
+      totalStudents,
+      totalTasksAssigned,
+      totalTasksCompleted,
+      completionRate,
+      byType,
+      byCohort,
+    })
+  } catch (err) {
+    console.error("Reports overview error:", err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get("/api/reports/leaderboard", async (req, res) => {
+  try {
+    const cohort = req.query.cohort || "jhs"
+    const limit = parseInt(req.query.limit || "10", 10)
+
+    const [resources, users, submissions] = await Promise.all([
+      getAllResources(),
+      getAllUsers(),
+      getSubmissionCounts(cohort),
+    ])
+
+    const students = users
+      .filter((u) => (u.role === "student" || !u.role) && getCohortFromGrade(u.gradeLevel) === cohort)
+      .map((s) => ({
+        id: s.id,
+        uid: s.uid || s.id,
+        name: s.displayName || "Unknown",
+        email: s.email,
+        gradeLevel: s.gradeLevel || "—",
+      }))
+
+    const taskCounts = countTasksByType(resources, cohort)
+    const tasksPerStudent = Object.values(taskCounts).reduce((a, b) => a + b, 0)
+
+    const leaderboard = students
+      .map((s) => {
+        const completed = submissions.byStudent[s.uid || s.id] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
+        const totalCompleted = Object.values(completed).reduce((a, b) => a + b, 0)
+        return {
+          name: s.name,
+          email: s.email,
+          gradeLevel: s.gradeLevel,
+          tasksAssigned: tasksPerStudent,
+          tasksCompleted: totalCompleted,
+          completionRate: tasksPerStudent > 0 ? parseFloat(((totalCompleted / tasksPerStudent) * 100).toFixed(1)) : 0,
+        }
+      })
+      .sort((a, b) => b.completionRate - a.completionRate)
+      .slice(0, limit)
+      .map((s, i) => ({ rank: i + 1, ...s }))
+
+    res.json({ cohort, students: leaderboard })
+  } catch (err) {
+    console.error("Leaderboard error:", err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get("/api/reports/cohort-performance", async (req, res) => {
+  try {
+    const [resources, users, jhsSubs, shsSubs] = await Promise.all([
+      getAllResources(),
+      getAllUsers(),
+      getSubmissionCounts("jhs"),
+      getSubmissionCounts("shs"),
+    ])
+
+    const students = users.filter((u) => u.role === "student" || !u.role)
+    const jhsStudents = students.filter((s) => getCohortFromGrade(s.gradeLevel) === "jhs")
+    const shsStudents = students.filter((s) => getCohortFromGrade(s.gradeLevel) === "shs")
+
+    const jhsTaskCounts = countTasksByType(resources, "jhs")
+    const shsTaskCounts = countTasksByType(resources, "shs")
+
+    const jhsAssigned = Object.values(jhsTaskCounts).reduce((a, b) => a + b, 0) * jhsStudents.length
+    const shsAssigned = Object.values(shsTaskCounts).reduce((a, b) => a + b, 0) * shsStudents.length
+    const jhsCompleted = Object.values(jhsSubs.counts).reduce((a, b) => a + b, 0)
+    const shsCompleted = Object.values(shsSubs.counts).reduce((a, b) => a + b, 0)
+
+    res.json({
+      jhs: {
+        students: jhsStudents.length,
+        tasksAssigned: jhsAssigned,
+        tasksCompleted: jhsCompleted,
+        rate: jhsAssigned > 0 ? parseFloat(((jhsCompleted / jhsAssigned) * 100).toFixed(1)) : 0,
+      },
+      shs: {
+        students: shsStudents.length,
+        tasksAssigned: shsAssigned,
+        tasksCompleted: shsCompleted,
+        rate: shsAssigned > 0 ? parseFloat(((shsCompleted / shsAssigned) * 100).toFixed(1)) : 0,
+      },
+    })
+  } catch (err) {
+    console.error("Cohort performance error:", err)
+    res.status(500).json({ error: err.message })
+  }
 })
 
 app.listen(PORT, () => {

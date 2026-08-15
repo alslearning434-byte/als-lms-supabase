@@ -12,8 +12,12 @@ dist
 dist-ssr
 *.local
 uploads
+backups
 student-credentials.txt
 teacher-credentials.txt
+
+# PocketBase runtime (binary + live database + generated schema migrations)
+pocketbase/
 
 # Editor directories and files
 .vscode/*
@@ -29,3 +33,4 @@ teacher-credentials.txt
 # Temp / scratch
 PLAN.md
 nul
+test-server.js

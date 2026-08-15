@@ -10,9 +10,8 @@ import ChangePasswordModal from "../components/ChangePasswordModal"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
 import { assignments } from "../data/assignments"
-import { db } from "../firebase"
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore"
-import type { NavItem, Resource, ModuleContent, ModuleBlock, TableData, ModuleAssessment } from "../types"
+import { pb } from "../pocketbase"
+import type { NavItem, Resource, ModuleContent, ModuleBlock, TableData } from "../types"
 import { getSubjectIcon } from "../utils/subjectIcons"
 import ImageCarousel from "../components/ImageCarousel"
 
@@ -77,6 +76,11 @@ export default function Teacher() {
   const [aiScore, setAiScore] = useState<number | null>(null)
   const [aiChecking, setAiChecking] = useState(false)
   const [resources, setResources] = useState<Resource[]>([])
+  const [recentSubmissions, setRecentSubmissions] = useState<{ id: string; name: string; title: string; submittedAt: string; type: "assignment" | "quiz" | "assessment" }[]>([])
+  const [subUsers, setSubUsers] = useState<Record<string, string>>({})
+  const [subAssign, setSubAssign] = useState<any[]>([])
+  const [subQuiz, setSubQuiz] = useState<any[]>([])
+  const [subAssess, setSubAssess] = useState<any[]>([])
   const [resSubject, setResSubject] = useState("")
   const [resTitle, setResTitle] = useState("")
   const [resDesc, setResDesc] = useState("")
@@ -198,38 +202,149 @@ export default function Teacher() {
   }
 
   useEffect(() => {
-    const fetchResources = async () => {
-      const snap = await getDocs(collection(db, "resources"))
-      const items: Resource[] = snap.docs.map((d) => {
-        const data = d.data() as Resource
-        return {
-          id: d.id,
-          ...data,
-          modules: (data.modules || []).map((m: any) => {
-            if (m.blocks) {
-              return { ...m, blocks: m.blocks.map((b: any) => ({ id: b.id, type: b.type, topic: b.topic, description: b.description, imageData: b.imageData })) }
-            }
-            const blocks: ModuleBlock[] = []
-            if (m.content) blocks.push({ id: `mig_${d.id}_c`, type: "content", topic: "", description: m.content })
-            if (m.images) (m.images as string[]).forEach((img, i) => blocks.push({ id: `mig_${d.id}_img_${i}`, type: "image", topic: "", description: "", imageData: img }))
-            if (m.tables) {
-              const tables = typeof m.tables === "string" ? JSON.parse(m.tables) : (m.tables || [])
-              tables.forEach((t: TableData, i: number) => {
-                let html = "<table><tbody>"
-                t.cells.forEach(row => { html += "<tr>" + row.map(cell => `<td style="text-align:${t.textAlign || "left"}">${cell}</td>`).join("") + "</tr>" })
-                html += "</tbody></table>"
-                blocks.push({ id: `mig_${d.id}_tbl_${i}`, type: "table", topic: "", description: html })
-              })
-            }
-            return { name: m.name || "", description: m.description || "", blocks, tasks: m.tasks || [] }
-          }),
-          assessment: data.assessment || undefined,
-        }
-      })
-      setResources(items)
+    const unsubs: (() => void)[] = []
+
+    const loadResources = async () => {
+      try {
+        const docs = await pb.collection("resources").getFullList()
+        const items: Resource[] = docs.map((data) => {
+          return {
+            id: data.id,
+            subject: data.subject || "",
+            title: data.title || "",
+            description: data.description || "",
+            uploadedBy: data.uploadedBy || "",
+            uploadedAt: data.uploadedAt || "",
+            modules: (data.modules || []).map((m: any) => {
+              if (m.blocks) {
+                return { ...m, blocks: m.blocks.map((b: any) => ({ id: b.id, type: b.type, topic: b.topic, description: b.description, imageData: b.imageData })) }
+              }
+              const blocks: ModuleBlock[] = []
+              if (m.content) blocks.push({ id: `mig_${data.id}_c`, type: "content", topic: "", description: m.content })
+              if (m.images) (m.images as string[]).forEach((img, i) => blocks.push({ id: `mig_${data.id}_img_${i}`, type: "image", topic: "", description: "", imageData: img }))
+              if (m.tables) {
+                const tables = typeof m.tables === "string" ? JSON.parse(m.tables) : (m.tables || [])
+                tables.forEach((t: TableData, i: number) => {
+                  let html = "<table><tbody>"
+                  t.cells.forEach(row => { html += "<tr>" + row.map(cell => `<td style="text-align:${t.textAlign || "left"}">${cell}</td>`).join("") + "</tr>" })
+                  html += "</tbody></table>"
+                  blocks.push({ id: `mig_${data.id}_tbl_${i}`, type: "table", topic: "", description: html })
+                })
+              }
+              return { name: m.name || "", description: m.description || "", blocks, tasks: m.tasks || [] }
+            }),
+            assessment: data.assessment || undefined,
+          }
+        })
+        setResources(items)
+      } catch { /* offline */ }
     }
-    fetchResources()
+
+    const subscribe = async () => {
+      try {
+        const u = await pb.collection("resources").subscribe("*", () => { loadResources() })
+        unsubs.push(u)
+      } catch { /* realtime unavailable */ }
+    }
+
+    loadResources()
+    subscribe()
+
+    return () => { unsubs.forEach((u) => { try { u() } catch { /* ignore */ } }) }
   }, [])
+
+  useEffect(() => {
+    const unsubs: (() => void)[] = []
+
+    const loadUsers = async () => {
+      try {
+        const docs = await pb.collection("users").getFullList()
+        const userMap: Record<string, string> = {}
+        docs.forEach((d) => {
+          if (d.name) userMap[d.uid || d.id] = d.name
+        })
+        setSubUsers(userMap)
+      } catch { /* offline */ }
+    }
+
+    const loadSubmissions = async () => {
+      try {
+        const assign = await pb.collection("assignmentSubmissions").getFullList()
+        const quiz = await pb.collection("quizSubmissions").getFullList()
+        const assess = await pb.collection("assessmentSubmissions").getFullList()
+        setSubAssign(assign.map((d) => ({ ...d })))
+        setSubQuiz(quiz.map((d) => ({ ...d })))
+        setSubAssess(assess.map((d) => ({ ...d })))
+      } catch { /* offline */ }
+    }
+
+    loadUsers()
+    loadSubmissions()
+
+    const subscribe = async () => {
+      try {
+        const u1 = await pb.collection("users").subscribe("*", () => { loadUsers() })
+        const u2 = await pb.collection("assignmentSubmissions").subscribe("*", () => { loadSubmissions() })
+        const u3 = await pb.collection("quizSubmissions").subscribe("*", () => { loadSubmissions() })
+        const u4 = await pb.collection("assessmentSubmissions").subscribe("*", () => { loadSubmissions() })
+        unsubs.push(u1, u2, u3, u4)
+      } catch { /* realtime unavailable */ }
+    }
+    subscribe()
+
+    return () => { unsubs.forEach((u) => { try { u() } catch { /* ignore */ } }) }
+  }, [])
+
+  useEffect(() => {
+    if (resources.length === 0) return
+    const toDate = (v: unknown): string => {
+      if (!v) return ""
+      const t = v as { seconds?: number; toDate?: () => Date }
+      return new Date(typeof t.toDate === "function" ? t.toDate() : (t.seconds ? t.seconds * 1000 : String(v))).toISOString()
+    }
+    const entries: { id: string; name: string; title: string; submittedAt: string; type: "assignment" | "quiz" | "assessment" }[] = []
+    subAssign.forEach((d) => {
+      const sub = d.submittedAt ? toDate(d.submittedAt) : ""
+      if (!sub) return
+      const res = resources.find(r => r.id === d.resourceId)
+      const mod = res?.modules?.[d.moduleIdx]
+      const task = mod?.tasks?.find(t => t.id === d.taskId)
+      entries.push({
+        id: d.id,
+        name: d.studentName || subUsers[d.studentId] || d.studentId || "Unknown Student",
+        title: task?.title || (res ? `${res.title}${mod?.name ? ` - ${mod.name}` : ""}` : "Assignment Submission"),
+        submittedAt: sub,
+        type: "assignment",
+      })
+    })
+    subQuiz.forEach((d) => {
+      const sub = d.submittedAt ? toDate(d.submittedAt) : ""
+      if (!sub) return
+      const res = resources.find(r => r.id === d.resourceId)
+      const mod = res?.modules?.[d.moduleIdx]
+      entries.push({
+        id: d.id,
+        name: d.studentName || subUsers[d.studentId] || d.studentId || "Unknown Student",
+        title: `${res?.title || "Resource"}${mod?.name ? ` - ${mod.name}` : ""} Quiz`,
+        submittedAt: sub,
+        type: "quiz",
+      })
+    })
+    subAssess.forEach((d) => {
+      const sub = d.submittedAt ? toDate(d.submittedAt) : ""
+      if (!sub) return
+      const res = resources.find(r => r.id === d.resourceId)
+      entries.push({
+        id: d.id,
+        name: d.studentName || subUsers[d.studentId] || d.studentId || "Unknown Student",
+        title: `${res?.title || "Resource"} - Assessment`,
+        submittedAt: sub,
+        type: "assessment",
+      })
+    })
+    entries.sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : -1))
+    setRecentSubmissions(entries.slice(0, 6))
+  }, [resources, subUsers, subAssign, subQuiz, subAssess])
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60000)
@@ -237,35 +352,48 @@ export default function Teacher() {
   }, [])
 
   useEffect(() => {
-    const fetchCohortData = async () => {
-      const snap = await getDocs(collection(db, "users"))
-      let jhs = 0, shs = 0, total = 0
-      const teacherList: { name: string; dept: string; email: string; status: string; level: string }[] = []
-      snap.docs.forEach((d) => {
-        const data = d.data()
-        if (data.role === "student") {
-          total++
-          const gl = data.gradeLevel || ""
-          if (gl.startsWith("Grade") && !gl.startsWith("Senior")) jhs++
-          else shs++
-        } else if (data.role === "teacher" && data.uid !== profile?.uid) {
-          const dept = data.department || ""
-          let level = "Junior High School"
-          if (["Senior High School", "ABM", "HUMSS", "STEM", "TVL"].includes(dept)) level = "Senior High School"
-          teacherList.push({
-            name: data.displayName || "",
-            dept,
-            email: data.email || "",
-            status: "Active",
-            level,
-          })
-        }
-      })
-      setCohortCounts({ jhs, shs })
-      setTotalStudents(total)
-      setColleagues(teacherList)
+    const unsubs: (() => void)[] = []
+
+    const loadUsers = async () => {
+      try {
+        const docs = await pb.collection("users").getFullList()
+        let jhs = 0, shs = 0, total = 0
+        const teacherList: { name: string; dept: string; email: string; status: string; level: string }[] = []
+        docs.forEach((data) => {
+          if (data.role === "student") {
+            total++
+            const gl = data.gradeLevel || ""
+            if (gl.startsWith("Grade") && !gl.startsWith("Senior")) jhs++
+            else shs++
+          } else if (data.role === "teacher" && data.uid !== profile?.uid) {
+            const dept = data.department || ""
+            let level = "Junior High School"
+            if (["Senior High School", "ABM", "HUMSS", "STEM", "TVL"].includes(dept)) level = "Senior High School"
+            teacherList.push({
+              name: data.name || "",
+              dept,
+              email: data.email || "",
+              status: "Active",
+              level,
+            })
+          }
+        })
+        setCohortCounts({ jhs, shs })
+        setTotalStudents(total)
+        setColleagues(teacherList)
+      } catch { /* offline */ }
     }
-    fetchCohortData()
+
+    loadUsers()
+    const subscribe = async () => {
+      try {
+        const u = await pb.collection("users").subscribe("*", () => { loadUsers() })
+        unsubs.push(u)
+      } catch { /* realtime unavailable */ }
+    }
+    subscribe()
+
+    return () => { unsubs.forEach((u) => { try { u() } catch { /* ignore */ } }) }
   }, [profile?.uid])
 
   useEffect(() => {
@@ -351,10 +479,10 @@ export default function Teacher() {
         const existing = resources.find(r => r.id === editingResourceId)
         const payloadWithAssessment: Record<string, any> = { ...payload }
         if (existing?.assessment) payloadWithAssessment.assessment = stripUndefined(existing.assessment)
-        await updateDoc(doc(db, "resources", editingResourceId), payloadWithAssessment)
+        await pb.collection("resources").update(editingResourceId, payloadWithAssessment)
         setResources((prev) => prev.map(r => r.id === editingResourceId ? { ...r, ...payload, modules: filteredModules, assessment: existing?.assessment } : r))
       } else {
-        const docRef = await addDoc(collection(db, "resources"), {
+        const docRef = await pb.collection("resources").create({
           ...payload,
           uploadedBy: profile?.displayName || "Teacher",
           uploadedAt: new Date().toISOString(),
@@ -434,7 +562,7 @@ export default function Teacher() {
   const handleDeleteResource = async () => {
     if (!deletingResourceId) return
     try {
-      await deleteDoc(doc(db, "resources", deletingResourceId))
+      await pb.collection("resources").delete(deletingResourceId)
       setResources((prev) => prev.filter((r) => r.id !== deletingResourceId))
       if (previewResource?.id === deletingResourceId) setPreviewResource(null)
       if (editingAssessmentResourceId === deletingResourceId) setEditingAssessmentResourceId(null)
@@ -451,7 +579,7 @@ export default function Teacher() {
       delete cloned.id
       cloned.title = cloned.title + " (copy)"
       cloned.uploadedAt = new Date().toISOString()
-      const docRef = await addDoc(collection(db, "resources"), cloned)
+      const docRef = await pb.collection("resources").create(cloned)
       setResources((prev) => [...prev, { ...cloned, id: docRef.id }])
     } catch (err) {
       console.error("Failed to copy resource:", err)
@@ -557,27 +685,37 @@ export default function Teacher() {
               <div className="rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="px-6 py-4 bg-navy-500"><h3 className="font-bold text-white">Recent Submissions Activity Log</h3></div>
                 <div className="divide-y divide-gray-200">
-                  {[
-                    { name: "Juan Dela Cruz", assignment: "Communication Skills - Essay Assignment", time: "May 18, 2026 - 10:30 AM", color: "bg-blue-100 text-blue-600" },
-                    { name: "Maria Santos", assignment: "Scientific Literacy - Research Portfolio", time: "May 18, 2026 - 09:15 AM", color: "bg-green-100 text-green-600" },
-                    { name: "Pedro Reyes", assignment: "Mathematical Reasoning - Problem Set 4", time: "May 17, 2026 - 04:45 PM", color: "bg-purple-100 text-purple-600" }
-                  ].map((a) => (
-                    <div key={a.name} className="px-6 py-4 flex items-center justify-between gap-4 hover:bg-gray-50 transition">
-                      <div className="flex items-start gap-4 flex-1">
-                        <div className={`w-10 h-10 rounded-full ${a.color} flex items-center justify-center flex-shrink-0`}>
-                          <i className="fas fa-user-graduate text-sm" />
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-semibold text-gray-800">{a.name}</p>
-                          <p className="text-sm text-gray-500">{a.assignment}</p>
-                          <p className="text-xs text-gray-400 mt-1">{a.time}</p>
-                        </div>
+                  {recentSubmissions.length === 0 ? (
+                    <div className="px-6 py-10 text-center">
+                      <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-3">
+                        <i className="fas fa-inbox text-gray-300 text-lg" />
                       </div>
-                      <button className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-600 transition whitespace-nowrap">
-                        <i className="fas fa-star text-xs mr-1" /> Review &amp; Grade
-                      </button>
+                      <p className="text-sm text-gray-500">No submissions yet</p>
                     </div>
-                  ))}
+                  ) : (
+                    recentSubmissions.map((a, i) => {
+                      const colors = ["bg-blue-100 text-blue-600", "bg-green-100 text-green-600", "bg-purple-100 text-purple-600"]
+                      const typeIcon = a.type === "assignment" ? "fa-file-alt" : a.type === "quiz" ? "fa-clipboard-check" : "fa-clipboard-list"
+                      const time = a.submittedAt ? new Date(a.submittedAt).toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(",", " -") : ""
+                      return (
+                        <div key={a.id} className="px-6 py-4 flex items-center justify-between gap-4 hover:bg-gray-50 transition">
+                          <div className="flex items-start gap-4 flex-1">
+                            <div className={`w-10 h-10 rounded-full ${colors[i % colors.length]} flex items-center justify-center flex-shrink-0`}>
+                              <i className="fas fa-user-graduate text-sm" />
+                            </div>
+                            <div className="flex-1">
+                              <p className="font-semibold text-gray-800">{a.name}</p>
+                              <p className="text-sm text-gray-500">{a.title}</p>
+                              <p className="text-xs text-gray-400 mt-1"><i className={`fas ${typeIcon} mr-1.5 text-[9px]`} />{time}</p>
+                            </div>
+                          </div>
+                          <button className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-600 transition whitespace-nowrap">
+                            <i className="fas fa-star text-xs mr-1" /> Review &amp; Grade
+                          </button>
+                        </div>
+                      )
+                    })
+                  )}
                 </div>
               </div>
             </div>
@@ -979,7 +1117,7 @@ export default function Teacher() {
                           try {
                             const draft = assessmentDraftRef.current ?? activeResource.assessment
                             const payload = stripUndefined(draft) ?? null
-                            await updateDoc(doc(db, "resources", activeResource.id), { assessment: payload })
+                            await pb.collection("resources").update(activeResource.id, { assessment: payload })
                             setResources(prev => prev.map(r => r.id === activeResource.id ? { ...r, assessment: draft } : r))
                             setAssessmentSaved(true)
                             setTimeout(() => setAssessmentSaved(false), 3000)

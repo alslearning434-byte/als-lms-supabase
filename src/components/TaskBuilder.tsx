@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from "react"
 import type { ModuleTask, TaskType, RubricItem, TaskAttachment, ModuleBlock, AssessmentQuestion } from "../types"
 import AssessmentBuilder from "./AssessmentBuilder"
 
+const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/+$/, "")
+
 const TASK_TYPES: { type: TaskType; icon: string; label: string; desc: string; color: string }[] = [
   { type: "assignment", icon: "fa-book-open", label: "Assignment", desc: "Task with instructions and file submission", color: "#1A73E8" },
   { type: "quiz", icon: "fa-clipboard-list", label: "Quiz", desc: "Auto-graded quiz with questions", color: "#0F9D58" },
@@ -137,9 +139,9 @@ export default function TaskBuilder({ tasks, onChange, isDark, moduleData, activ
                     onClick={async () => {
                       if (!moduleData) return
                       const endpoints: Record<string, string> = {
-                        assignment: "http://localhost:3001/api/generate-assignment",
-                        discussion: "http://localhost:3001/api/generate-discussion",
-                        material: "http://localhost:3001/api/generate-material",
+                        assignment: `${API_BASE}/api/generate-assignment`,
+                        discussion: `${API_BASE}/api/generate-discussion`,
+                        material: `${API_BASE}/api/generate-material`,
                       }
                       const url = endpoints[task.type]
                       if (!url) return
@@ -244,7 +246,7 @@ export default function TaskBuilder({ tasks, onChange, isDark, moduleData, activ
                       setAiGenerating(task.id)
                       setAiError(null)
                       try {
-                        const res = await fetch("http://localhost:3001/api/generate-quiz", {
+                        const res = await fetch(`${API_BASE}/api/generate-quiz`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({

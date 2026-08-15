@@ -7,11 +7,16 @@ import LogoutModal from "../components/LogoutModal"
 import ChangePasswordModal from "../components/ChangePasswordModal"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
-import { db } from "../firebase"
-import { collection, getDocs, addDoc } from "firebase/firestore"
-import { createUserWithEmailAndPassword } from "firebase/auth"
-import { auth } from "../firebase"
+import { pb, getActivities, subscribeActivities } from "../pocketbase"
 import type { NavItem } from "../types"
+
+const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/+$/, "")
+
+async function fetchAPI(path: string) {
+  const res = await fetch(`${API_BASE}${path}`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
 
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "th-large" },
@@ -19,17 +24,6 @@ const navItems: NavItem[] = [
   { id: "database-backup", label: "Database Back-up", icon: "database" },
   { id: "calendar", label: "Calendar", icon: "calendar-alt" },
   { id: "reports", label: "Reports", icon: "chart-bar" }
-]
-
-const backupHistory = [
-  { date: "May 26, 2026", time: "05:00 PM", type: "Automatic", size: "1.2 GB", status: "Completed", statusColor: "bg-green-100 text-green-600" },
-  { date: "May 25, 2026", time: "05:00 PM", type: "Automatic", size: "1.2 GB", status: "Completed", statusColor: "bg-green-100 text-green-600" },
-  { date: "May 24, 2026", time: "05:00 PM", type: "Automatic", size: "1.2 GB", status: "Completed", statusColor: "bg-green-100 text-green-600" },
-  { date: "May 23, 2026", time: "05:00 PM", type: "Automatic", size: "1.2 GB", status: "Completed", statusColor: "bg-green-100 text-green-600" },
-  { date: "May 22, 2026", time: "05:00 PM", type: "Automatic", size: "1.2 GB", status: "Completed", statusColor: "bg-green-100 text-green-600" },
-  { date: "May 22, 2026", time: "10:30 AM", type: "Manual", size: "1.1 GB", status: "Completed", statusColor: "bg-blue-100 text-blue-600" },
-  { date: "May 21, 2026", time: "05:00 PM", type: "Automatic", size: "1.2 GB", status: "Completed", statusColor: "bg-green-100 text-green-600" },
-  { date: "May 20, 2026", time: "05:00 PM", type: "Automatic", size: "1.2 GB", status: "Completed", statusColor: "bg-green-100 text-green-600" }
 ]
 
 export default function Admin() {
@@ -63,24 +57,135 @@ export default function Admin() {
   const [jhsPage, setJhsPage] = useState(1)
   const [shsPage, setShsPage] = useState(1)
   const isDark = theme === "dark"
+  const [userStats, setUserStats] = useState({ total: 0, students: 0, teachers: 0, admins: 0 })
+  const [serverStatus, setServerStatus] = useState<{ status: string; uptimeSeconds: number; nextBackupAt?: string; health?: { cpu: number; memory: number; storage: number } } | null>(null)
+  const [backups, setBackups] = useState<{ id: string; date: string; time: string; type: string; size: string; status: string; statusColor: string; bytes?: number; fileId?: string }[]>([])
+  const [activities, setActivities] = useState<{ id: string; action: string; detail: string; user: string; status: string; createdAt: string }[]>([])
+  const [reportsOverview, setReportsOverview] = useState<{
+    totalStudents: number
+    totalTasksAssigned: number
+    totalTasksCompleted: number
+    completionRate: number
+    byType: Record<string, { assigned: number; completed: number; rate: number }>
+    byCohort: Record<string, { students: number; tasksAssigned: number; tasksCompleted: number; rate: number }>
+  } | null>(null)
+  const [jhsLeaderboard, setJhsLeaderboard] = useState<{ rank: number; name: string; email: string; gradeLevel: string; tasksAssigned: number; tasksCompleted: number; completionRate: number }[]>([])
+  const [shsLeaderboard, setShsLeaderboard] = useState<{ rank: number; name: string; email: string; gradeLevel: string; tasksAssigned: number; tasksCompleted: number; completionRate: number }[]>([])
 
   useEffect(() => {
     const fetchTeachers = async () => {
-      const snap = await getDocs(collection(db, "users"))
-      const items = snap.docs
-        .map((d) => ({ uid: d.id, ...d.data() } as { uid: string; displayName: string; email: string; role: string; department?: string; employeeId?: string; phone?: string; joinDate?: string }))
-        .filter((u) => u.role === "teacher")
-      setTeachers(items.map((t) => ({
-        uid: t.uid,
-        displayName: t.displayName,
-        email: t.email,
-        department: t.department || "",
-        employeeId: t.employeeId || "",
-        phone: t.phone || "",
-        joinDate: t.joinDate || "",
-      })))
+      try {
+        const users = await fetchAPI("/api/users")
+        const items = users
+          .filter((u: any) => u.role === "teacher")
+        setTeachers(items.map((t: any) => ({
+          uid: t.uid || t.id,
+          displayName: t.displayName,
+          email: t.email,
+          department: t.department || "",
+          employeeId: t.employeeId || "",
+          phone: t.phone || "",
+          joinDate: t.joinDate || "",
+        })))
+      } catch { /* offline */ }
     }
     fetchTeachers()
+  }, [])
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const users = await fetchAPI("/api/users")
+        const all = users.map((u: { role?: string }) => ({ role: u.role }))
+        setUserStats({
+          total: all.length,
+          students: all.filter((u: { role?: string }) => u.role === "student" || !u.role).length,
+          teachers: all.filter((u: { role?: string }) => u.role === "teacher").length,
+          admins: all.filter((u: { role?: string }) => u.role === "admin").length,
+        })
+      } catch { /* offline */ }
+    }
+    fetchStats()
+  }, [])
+
+  useEffect(() => {
+    const fetchServerStatus = async () => {
+      try {
+        const status = await fetchAPI("/api/status")
+        setServerStatus(status)
+      } catch { /* offline */ }
+    }
+    fetchServerStatus()
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    let unsubPocket: (() => void) | null = null
+
+    const loadBackups = async () => {
+      try {
+        const docs = await pb.collection("backups").getFullList({ sort: "-createdAt" })
+        if (cancelled) return
+        const items = docs.map((d) => ({
+          id: d.id,
+          date: d.date || "",
+          time: d.time || "",
+          type: d.type || "Automatic",
+          size: d.size || "",
+          status: d.status || "Completed",
+          statusColor: d.status === "Completed"
+            ? "bg-green-100 text-green-600"
+            : String(d.status || "").toLowerCase().includes("fail")
+              ? "bg-red-100 text-red-600"
+              : "bg-amber-100 text-amber-600",
+          fileId: d.fileId || "",
+        }))
+        setBackups(items)
+      } catch { /* offline */ }
+    }
+    loadBackups()
+
+    const subscribe = async () => {
+      try {
+        unsubPocket = await pb.collection("backups").subscribe("*", () => { loadBackups() })
+      } catch { /* realtime unavailable */ }
+    }
+    subscribe()
+
+    return () => { cancelled = true; unsubPocket?.() }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    let unsubPocket: (() => void) | null = null
+
+    async function initActivities() {
+      try {
+        const initial = await getActivities()
+        if (cancelled) return
+        setActivities(initial)
+        unsubPocket = await subscribeActivities((acts) => { if (!cancelled) setActivities(acts) })
+      } catch { /* offline */ }
+    }
+    initActivities()
+
+    return () => { cancelled = true; unsubPocket?.() }
+  }, [])
+
+  useEffect(() => {
+    const fetchReports = async () => {
+      try {
+        const [overview, jhsLb, shsLb] = await Promise.all([
+          fetchAPI("/api/reports/overview"),
+          fetchAPI("/api/reports/leaderboard?cohort=jhs&limit=10"),
+          fetchAPI("/api/reports/leaderboard?cohort=shs&limit=10"),
+        ])
+        setReportsOverview(overview)
+        setJhsLeaderboard(jhsLb.students || [])
+        setShsLeaderboard(shsLb.students || [])
+      } catch { /* offline */ }
+    }
+    fetchReports()
   }, [])
 
   useEffect(() => { setUserPage(1) }, [userFilter])
@@ -245,9 +350,33 @@ export default function Admin() {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
                 {[
-                  { label: "Total Active Users System-wide", value: "1,284", sub: "+42 this month", icon: "fa-users", color: "bg-blue-100 text-blue-600", subColor: "text-green-600", subIcon: "fa-arrow-up" },
-                  { label: "Server Status", value: "Operational", sub: "Uptime: 99.9% over 30 days", icon: "fa-server", color: "bg-green-100 text-green-600", subColor: "text-xs text-green-600", subIcon: null, dot: true },
-                  { label: "Last Database Backup", value: "May 23, 2026", sub: "02:30 AM • Size: 1.2 GB", icon: "fa-database", color: "bg-amber-100 text-amber-600", subColor: "" }
+                  { 
+                    label: "Total Active Users System-wide", 
+                    value: userStats.total > 0 ? userStats.total.toLocaleString() : "—", 
+                    sub: userStats.students > 0 ? `+${userStats.students} students, ${userStats.teachers} teachers` : "Loading...", 
+                    icon: "fa-users", 
+                    color: "bg-blue-100 text-blue-600", 
+                    subColor: "text-green-600", 
+                    subIcon: "fa-arrow-up" 
+                  },
+                  { 
+                    label: "Server Status", 
+                    value: serverStatus?.status === "Operational" ? "Operational" : "Checking...", 
+                    sub: serverStatus ? `Uptime: ${Math.floor(serverStatus.uptimeSeconds / 3600)}h ${Math.floor((serverStatus.uptimeSeconds % 3600) / 60)}m` : "Loading...", 
+                    icon: "fa-server", 
+                    color: "bg-green-100 text-green-600", 
+                    subColor: "text-xs text-green-600", 
+                    subIcon: null, 
+                    dot: true 
+                  },
+                  { 
+                    label: "Last Database Backup", 
+                    value: backups[0] ? backups[0].date : "No backups yet", 
+                    sub: backups[0] ? `${backups[0].time} • Size: ${backups[0].size}` : "Run a manual back-up to create one", 
+                    icon: "fa-database", 
+                    color: "bg-amber-100 text-amber-600", 
+                    subColor: "" 
+                  }
                 ].map((s) => (
                   <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
                     <div className="flex items-center justify-between mb-3">
@@ -285,21 +414,34 @@ export default function Admin() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {[
-                        { status: "Completed", statusColor: "bg-green-100 text-green-600", user: "admin@gmail.com", action: "User Provision", time: "May 23, 2026 09:15 AM", detail: "New teacher account created" },
-                        { status: "Completed", statusColor: "bg-green-100 text-green-600", user: "system", action: "Backup", time: "May 23, 2026 02:30 AM", detail: "Database backup completed" },
-                        { status: "In Progress", statusColor: "bg-blue-100 text-blue-600", user: "michael.reyes@gmail.com", action: "Curriculum Update", time: "May 22, 2026 04:45 PM", detail: "Science module revision pending" },
-                        { status: "Completed", statusColor: "bg-green-100 text-green-600", user: "system", action: "Security Scan", time: "May 22, 2026 12:00 PM", detail: "Weekly vulnerability scan — no threats" },
-                        { status: "Pending", statusColor: "bg-yellow-100 text-yellow-600", user: "juan.delacruz@gmail.com", action: "Registration", time: "May 22, 2026 10:20 AM", detail: "Teacher registration awaiting approval" }
-                      ].map((r, i) => (
-                        <tr key={i} className="hover:bg-gray-50 transition">
-                          <td className="px-6 py-4"><span className={`text-xs font-medium ${r.statusColor} px-2 py-0.5 rounded`}>{r.status}</span></td>
-                          <td className="px-6 py-4 text-sm font-medium text-gray-800">{r.user}</td>
-                          <td className="px-6 py-4 text-sm text-gray-600">{r.action}</td>
-                          <td className="px-6 py-4 text-sm text-gray-600">{r.time}</td>
-                          <td className="px-6 py-4 text-sm text-gray-500">{r.detail}</td>
+                      {activities.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-400">No activities recorded</td>
                         </tr>
-                      ))}
+                      ) : (
+                        activities.slice(0, 5).map((a, i) => {
+                          const statusColorMap: Record<string, string> = {
+                            Completed: "bg-green-100 text-green-600",
+                            "In Progress": "bg-blue-100 text-blue-600",
+                            Pending: "bg-yellow-100 text-yellow-600",
+                            Failed: "bg-red-100 text-red-600",
+                          }
+                          const statusColor = statusColorMap[a.status] || "bg-gray-100 text-gray-600"
+                          const time = a.createdAt ? new Date(a.createdAt).toLocaleString("en-US", {
+                            month: "short", day: "numeric", year: "numeric",
+                            hour: "numeric", minute: "2-digit", hour12: true
+                          }).replace(",", "") : ""
+                          return (
+                            <tr key={a.id || i} className="hover:bg-gray-50 transition">
+                              <td className="px-6 py-4"><span className={`text-xs font-medium ${statusColor} px-2 py-0.5 rounded`}>{a.status}</span></td>
+                              <td className="px-6 py-4 text-sm font-medium text-gray-800">{a.user}</td>
+                              <td className="px-6 py-4 text-sm text-gray-600">{a.action}</td>
+                              <td className="px-6 py-4 text-sm text-gray-600">{time}</td>
+                              <td className="px-6 py-4 text-sm text-gray-500">{a.detail}</td>
+                            </tr>
+                          )
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -310,36 +452,42 @@ export default function Admin() {
                   <h3 className="font-semibold text-gray-800 mb-4"><i className="fas fa-heartbeat text-red-500 mr-2" />System Health Metrics</h3>
                   <div className="space-y-5">
                     {[
-                      { label: "CPU Usage", pct: 42, color: "bg-blue-500", icon: "fa-microchip" },
-                      { label: "Memory Usage", pct: 67, color: "bg-purple-500", icon: "fa-memory" },
-                      { label: "Storage Usage", pct: 53, color: "bg-amber-500", icon: "fa-hdd" }
-                    ].map((m) => (
-                      <div key={m.label}>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-gray-600"><i className={`fas ${m.icon} mr-1`} />{m.label}</span>
-                          <span className="font-medium text-gray-800">{m.pct}%</span>
+                      { label: "CPU Usage", key: "cpu", color: "bg-blue-500", icon: "fa-microchip" },
+                      { label: "Memory Usage", key: "memory", color: "bg-purple-500", icon: "fa-memory" },
+                      { label: "Storage Usage", key: "storage", color: "bg-amber-500", icon: "fa-hdd" }
+                    ].map((m) => {
+                      const pct = serverStatus?.health?.[m.key as keyof typeof serverStatus.health] ?? 0
+                      return (
+                        <div key={m.label}>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className="text-gray-600"><i className={`fas ${m.icon} mr-1`} />{m.label}</span>
+                            <span className="font-medium text-gray-800">{pct}%</span>
+                          </div>
+                          <div className="progress-bar h-2.5"><div className={`progress-fill ${m.color}`} style={{ width: `${pct}%` }} /></div>
                         </div>
-                        <div className="progress-bar h-2.5"><div className={`progress-fill ${m.color}`} style={{ width: `${m.pct}%` }} /></div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
                 <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
                   <h3 className="font-semibold text-gray-800 mb-4"><i className="fas fa-chart-pie text-green-500 mr-2" />User Distribution</h3>
                   <div className="space-y-5">
                     {[
-                      { label: "Students", count: 1142, pct: 89, color: "bg-blue-500", icon: "fa-user-graduate", iconColor: "text-blue-500" },
-                      { label: "Teachers", count: 142, pct: 11, color: "bg-purple-500", icon: "fa-chalkboard-teacher", iconColor: "text-purple-500" },
-                      { label: "Administrator", count: 1, pct: 0.08, color: "bg-green-500", icon: "fa-user-shield", iconColor: "text-green-500" }
-                    ].map((u) => (
-                      <div key={u.label}>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-gray-600"><i className={`fas ${u.icon} mr-1 ${u.iconColor}`} />{u.label}</span>
-                          <span className="font-medium text-gray-800">{u.count.toLocaleString()}</span>
+                      { label: "Students", count: userStats.students, color: "bg-blue-500", icon: "fa-user-graduate", iconColor: "text-blue-500" },
+                      { label: "Teachers", count: userStats.teachers, color: "bg-purple-500", icon: "fa-chalkboard-teacher", iconColor: "text-purple-500" },
+                      { label: "Administrators", count: userStats.admins, color: "bg-green-500", icon: "fa-user-shield", iconColor: "text-green-500" }
+                    ].map((u) => {
+                      const pct = userStats.total > 0 ? Math.round((u.count / userStats.total) * 100) : 0
+                      return (
+                        <div key={u.label}>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className="text-gray-600"><i className={`fas ${u.icon} mr-1 ${u.iconColor}`} />{u.label}</span>
+                            <span className="font-medium text-gray-800">{u.count.toLocaleString()}</span>
+                          </div>
+                          <div className="progress-bar h-2.5"><div className={`progress-fill ${u.color}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>
                         </div>
-                        <div className="progress-bar h-2.5"><div className={`progress-fill ${u.color}`} style={{ width: `${Math.min(u.pct, 100)}%` }} /></div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               </div>
@@ -497,21 +645,23 @@ export default function Admin() {
                         setTeacherSaving(true)
                         setTeacherError("")
                         try {
-                          const cred = await createUserWithEmailAndPassword(auth, teacherForm.email, teacherForm.password)
                           const now = new Date()
                           const joinDate = `${["January","February","March","April","May","June","July","August","September","October","November","December"][now.getMonth()]} ${now.getFullYear()}`
-                          await addDoc(collection(db, "users"), {
-                            uid: cred.user.uid,
-                            displayName: teacherForm.name.trim(),
+                          const rec = await pb.collection("users").create({
                             email: teacherForm.email,
+                            password: teacherForm.password,
+                            passwordConfirm: teacherForm.password,
+                            name: teacherForm.name.trim(),
                             role: "teacher",
                             employeeId: teacherForm.employeeId.trim(),
                             department: teacherForm.department,
                             phone: teacherForm.contact.trim(),
                             joinDate,
                           })
+                          const uid = rec.id
+                          await pb.collection("users").update(uid, { uid })
                           setTeachers((prev) => [...prev, {
-                            uid: cred.user.uid,
+                            uid,
                             displayName: teacherForm.name.trim(),
                             email: teacherForm.email,
                             department: teacherForm.department,
@@ -566,8 +716,12 @@ export default function Admin() {
                   <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
                     <i className="fas fa-info-circle text-blue-500 text-sm" /> Storage Summary
                   </h3>
-                  <p className="text-sm text-gray-500 mb-1">Total backups: <span className="font-semibold text-gray-800">{backupHistory.length}</span></p>
-                  <p className="text-xs text-gray-400">Average size: 1.2 GB per backup • Latest: May 26, 2026 at 5:00 PM</p>
+                  <p className="text-sm text-gray-500 mb-1">Total backups: <span className="font-semibold text-gray-800">{backups.length}</span></p>
+                  <p className="text-xs text-gray-400">
+                    {backups.length > 0
+                      ? `Average size: ${(backups.reduce((a, b) => a + (b.bytes || 0), 0) / backups.length / 1024 / 1024 / 1024).toFixed(1)} GB per backup • Latest: ${backups[0].date} at ${backups[0].time}`
+                      : "No backups yet"}
+                  </p>
                 </div>
               </div>
 
@@ -585,7 +739,7 @@ export default function Admin() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {backupHistory.map((b, i) => (
+                      {backups.map((b, i) => (
                         <tr key={i} className="hover:bg-gray-50 transition">
                           <td className="px-6 py-4 text-sm font-medium text-gray-800">{b.date}</td>
                           <td className="px-6 py-4 text-sm text-gray-600">{b.time}</td>
@@ -678,15 +832,19 @@ export default function Admin() {
                   <div>
                     <h3 className="font-semibold text-gray-800 mb-4">Overall Performance by Cohort</h3>
                     <div className="space-y-3">
-                      {[
-                        { label: "Junior High School", pct: 68, color: "bg-blue-500" },
-                        { label: "Senior High School", pct: 82, color: "bg-purple-500" }
-                      ].map((c) => (
-                        <div key={c.label}>
-                          <div className="flex justify-between text-sm mb-1"><span>{c.label}</span><span className="font-medium">{c.pct}%</span></div>
-                          <div className="progress-bar"><div className={`progress-fill ${c.color}`} style={{ width: `${c.pct}%` }} /></div>
-                        </div>
-                      ))}
+                      {reportsOverview?.byCohort && [
+                        { label: "Junior High School", key: "jhs", color: "bg-blue-500" },
+                        { label: "Senior High School", key: "shs", color: "bg-purple-500" }
+                      ].map((c) => {
+                        const cohort = reportsOverview.byCohort[c.key]
+                        const pct = cohort?.rate ?? 0
+                        return (
+                          <div key={c.label}>
+                            <div className="flex justify-between text-sm mb-1"><span>{c.label}</span><span className="font-medium">{pct}%</span></div>
+                            <div className="progress-bar"><div className={`progress-fill ${c.color}`} style={{ width: `${pct}%` }} /></div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                   <div>
@@ -694,14 +852,14 @@ export default function Admin() {
                     <div className="relative w-32 h-32 mx-auto">
                       <svg className="w-32 h-32 -rotate-90" viewBox="0 0 72 72">
                         <circle cx="36" cy="36" r="30" fill="none" stroke="#e2e8f0" strokeWidth="6" />
-                        <circle cx="36" cy="36" r="30" fill="none" stroke="#22c55e" strokeWidth="6" strokeLinecap="round" strokeDasharray="188.5" strokeDashoffset="56.5" />
+                        <circle cx="36" cy="36" r="30" fill="none" stroke="#22c55e" strokeWidth="6" strokeLinecap="round" strokeDasharray="188.5" strokeDashoffset={188.5 - (188.5 * (reportsOverview?.completionRate || 0) / 100)} />
                       </svg>
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-2xl font-bold text-gray-800">70%</span>
+                        <span className="text-2xl font-bold text-gray-800">{reportsOverview?.completionRate ?? 0}%</span>
                         <span className="text-[10px] text-gray-400">Complete</span>
                       </div>
                     </div>
-                    <p className="text-center text-sm text-gray-500 mt-3">847 out of 1,210 total assignments completed</p>
+                    <p className="text-center text-sm text-gray-500 mt-3">{reportsOverview?.totalTasksCompleted ?? 0} out of {reportsOverview?.totalTasksAssigned ?? 0} total tasks completed</p>
                   </div>
                 </div>
               </div>
@@ -712,19 +870,17 @@ export default function Admin() {
                     <i className="fas fa-trophy text-amber-500 text-sm" /> JHS Leaderboard
                   </h3>
                   <div className="space-y-3">
-                    {[
-                      { rank: 1, name: "Juan Dela Cruz", score: "89%", color: "bg-yellow-400" },
-                      { rank: 2, name: "Ana Gomez", score: "76%", color: "bg-gray-400" },
-                      { rank: 3, name: "Carlos Tan", score: "71%", color: "bg-amber-700" },
-                      { rank: 4, name: "Maria Flores", score: "68%", color: "bg-gray-300" },
-                      { rank: 5, name: "Pedro Reyes", score: "62%", color: "bg-gray-300" }
-                    ].map((s) => (
-                      <div key={s.rank} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition">
-                        <span className={`w-7 h-7 rounded-full ${s.color} flex items-center justify-center text-xs font-bold text-white`}>{s.rank}</span>
-                        <span className="flex-1 text-sm font-medium text-gray-800">{s.name}</span>
-                        <span className="text-sm font-semibold text-green-600">{s.score}</span>
-                      </div>
-                    ))}
+                    {jhsLeaderboard.length === 0 ? (
+                      <p className="text-sm text-gray-500 text-center py-4">No data available</p>
+                    ) : (
+                      jhsLeaderboard.map((s) => (
+                        <div key={s.rank} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition">
+                          <span className={`w-7 h-7 rounded-full ${s.rank === 1 ? "bg-yellow-400" : s.rank === 2 ? "bg-gray-400" : s.rank === 3 ? "bg-amber-700" : "bg-gray-300"} flex items-center justify-center text-xs font-bold text-white`}>{s.rank}</span>
+                          <span className="flex-1 text-sm font-medium text-gray-800">{s.name}</span>
+                          <span className="text-sm font-semibold text-green-600">{s.completionRate}%</span>
+                        </div>
+                      ))
+                    )}
                   </div>
                   <div className="flex justify-end mt-4">
                     <button onClick={() => { setJhsModalOpen(true); setJhsPage(1) }}
@@ -738,19 +894,17 @@ export default function Admin() {
                     <i className="fas fa-trophy text-amber-500 text-sm" /> SHS Leaderboard
                   </h3>
                   <div className="space-y-3">
-                    {[
-                      { rank: 1, name: "Maria Santos", score: "92%", color: "bg-yellow-400" },
-                      { rank: 2, name: "Kevin Torres", score: "85%", color: "bg-gray-400" },
-                      { rank: 3, name: "Nina Perez", score: "79%", color: "bg-amber-700" },
-                      { rank: 4, name: "Jose Lopez", score: "74%", color: "bg-gray-300" },
-                      { rank: 5, name: "Rosa Mendoza", score: "67%", color: "bg-gray-300" }
-                    ].map((s) => (
-                      <div key={s.rank} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition">
-                        <span className={`w-7 h-7 rounded-full ${s.color} flex items-center justify-center text-xs font-bold text-white`}>{s.rank}</span>
-                        <span className="flex-1 text-sm font-medium text-gray-800">{s.name}</span>
-                        <span className="text-sm font-semibold text-green-600">{s.score}</span>
-                      </div>
-                    ))}
+                    {shsLeaderboard.length === 0 ? (
+                      <p className="text-sm text-gray-500 text-center py-4">No data available</p>
+                    ) : (
+                      shsLeaderboard.map((s) => (
+                        <div key={s.rank} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition">
+                          <span className={`w-7 h-7 rounded-full ${s.rank === 1 ? "bg-yellow-400" : s.rank === 2 ? "bg-gray-400" : s.rank === 3 ? "bg-amber-700" : "bg-gray-300"} flex items-center justify-center text-xs font-bold text-white`}>{s.rank}</span>
+                          <span className="flex-1 text-sm font-medium text-gray-800">{s.name}</span>
+                          <span className="text-sm font-semibold text-green-600">{s.completionRate}%</span>
+                        </div>
+                      ))
+                    )}
                   </div>
                   <div className="flex justify-end mt-4">
                     <button onClick={() => { setShsModalOpen(true); setShsPage(1) }}

@@ -1,7 +1,6 @@
 import { useState } from "react"
 import type { ModuleAssessment, AssessmentQuestion } from "../types"
-import { db } from "../firebase"
-import { collection, addDoc } from "firebase/firestore"
+import { pb } from "../pocketbase"
 
 interface Props {
   resourceId: string
@@ -62,7 +61,8 @@ export default function AssessmentTaker({ resourceId, assessmentId, assessment, 
     const passed = context === "quiz" ? sc >= results.length * 0.5 : false
     setScore({ score: sc, total: results.length, results })
     setSubmitted(true)
-    addDoc(collection(db, "assessmentSubmissions"), {
+    const submittedAt = new Date().toISOString()
+    pb.collection("assessmentSubmissions").create({
       assessmentId,
       resourceId,
       studentId,
@@ -70,10 +70,10 @@ export default function AssessmentTaker({ resourceId, assessmentId, assessment, 
       score: sc,
       totalPoints: results.length,
       answers,
-      submittedAt: new Date().toISOString(),
+      submittedAt,
     }).catch(() => {})
     if (context === "quiz" && moduleIdx !== undefined) {
-      addDoc(collection(db, "quizSubmissions"), {
+      pb.collection("quizSubmissions").create({
         resourceId,
         moduleIdx,
         studentId,
@@ -82,7 +82,7 @@ export default function AssessmentTaker({ resourceId, assessmentId, assessment, 
         total: results.length,
         passed,
         answers,
-        submittedAt: new Date().toISOString(),
+        submittedAt,
       }).catch(() => {})
     }
     onComplete?.({ score: sc, total: results.length, passed })

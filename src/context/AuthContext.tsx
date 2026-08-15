@@ -1,13 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut,
-  type User,
-} from "firebase/auth"
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore"
-import { auth, db } from "../firebase"
+import { pb } from "../pocketbase"
+import { logActivity } from "../utils/activities"
 
 export type UserRole = "student" | "teacher" | "admin"
 
@@ -24,8 +17,13 @@ export interface UserProfile {
   joinDate?: string
 }
 
+export interface AuthUser {
+  uid: string
+  email: string | null
+}
+
 interface AuthContextValue {
-  user: User | null
+  user: AuthUser | null
   profile: UserProfile | null
   loading: boolean
   login: (email: string, password: string) => Promise<UserProfile>
@@ -54,6 +52,21 @@ const AuthContext = createContext<AuthContextValue>({
   resolveConflict: () => {},
 })
 
+function recordToProfile(r: Record<string, any>): UserProfile {
+  return {
+    uid: r.uid || r.id,
+    email: r.email || "",
+    displayName: r.name || r.email?.split("@")[0] || "",
+    role: r.role || "student",
+    lrn: r.lrn || undefined,
+    gradeLevel: r.gradeLevel || undefined,
+    phone: r.phone || undefined,
+    employeeId: r.employeeId || undefined,
+    department: r.department || undefined,
+    joinDate: r.joinDate || undefined,
+  }
+}
+
 const CREDS_KEY = "als_credentials"
 
 function saveCreds(email: string, password: string) {
@@ -74,58 +87,31 @@ function clearCreds() {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<AuthUser | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [sessionConflict, setSessionConflict] = useState(false)
-  const hasInitialized = useRef(false)
+  const recordId = useRef<string | null>(null)
   const currentEmail = useRef<string | null>(null)
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (hasInitialized.current) return
-      hasInitialized.current = true
-
-      const creds = loadCreds()
-      if (creds && firebaseUser && firebaseUser.email !== creds.email) {
+    const restore = async () => {
+      if (pb.authStore.isValid) {
         try {
-          const cred = await signInWithEmailAndPassword(auth, creds.email, creds.password)
-          setUser(cred.user)
-          currentEmail.current = cred.user.email
-          try {
-            const snap = await getDoc(doc(db, "users", cred.user.uid))
-            if (snap.exists()) {
-              setProfile(snap.data() as UserProfile)
-            }
-          } catch { /* offline */ }
+          const res = await pb.collection("users").authRefresh()
+          const rec = res.record
+          const p = recordToProfile(rec)
+          recordId.current = rec.id
+          currentEmail.current = p.email
+          setUser({ uid: p.uid, email: p.email })
+          setProfile(p)
         } catch {
-          clearCreds()
-          setUser(firebaseUser)
-          currentEmail.current = firebaseUser.email
-          try {
-            const snap = await getDoc(doc(db, "users", firebaseUser.uid))
-            if (snap.exists()) {
-              setProfile(snap.data() as UserProfile)
-            }
-          } catch { /* offline */ }
-        }
-      } else {
-        setUser(firebaseUser)
-        if (firebaseUser) {
-          currentEmail.current = firebaseUser.email
-          try {
-            const snap = await getDoc(doc(db, "users", firebaseUser.uid))
-            if (snap.exists()) {
-              setProfile(snap.data() as UserProfile)
-            }
-          } catch { /* offline */ }
+          pb.authStore.clear()
         }
       }
-
       setLoading(false)
-      unsubscribe()
-    })
-    return unsubscribe
+    }
+    restore()
   }, [])
 
   useEffect(() => {
@@ -144,16 +130,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = async (email: string, password: string): Promise<UserProfile> => {
-    const cred = await signInWithEmailAndPassword(auth, email, password)
-    const snap = await getDoc(doc(db, "users", cred.user.uid))
-    if (!snap.exists()) {
-      throw new Error("User profile not found in Firestore. Please register first.")
-    }
-    const userProfile = snap.data() as UserProfile
-    setUser(cred.user)
+    const authData = await pb.collection("users").authWithPassword(email, password)
+    const userProfile = recordToProfile(authData.record)
+    recordId.current = authData.record.id
+    setUser({ uid: userProfile.uid, email: userProfile.email })
     setProfile(userProfile)
     currentEmail.current = email
     saveCreds(email, password)
+    try { logActivity({ user: email, action: "Login", detail: "Signed in to the system" }) } catch { /* offline */ }
     return userProfile
   }
 
@@ -164,27 +148,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     lrn?: string
     gradeLevel?: string
   }): Promise<UserProfile> => {
-    const cred = await createUserWithEmailAndPassword(auth, data.email, data.password)
+    const rec = await pb.collection("users").create({
+      email: data.email,
+      password: data.password,
+      passwordConfirm: data.password,
+      name: data.displayName,
+      role: "student",
+      lrn: data.lrn || "",
+      gradeLevel: data.gradeLevel || "",
+    })
+    const uid = rec.id
+    await pb.collection("users").update(uid, { uid })
+    await pb.collection("users").authWithPassword(data.email, data.password)
     const userProfile: UserProfile = {
-      uid: cred.user.uid,
+      uid,
       email: data.email,
       displayName: data.displayName,
       role: "student",
       lrn: data.lrn,
       gradeLevel: data.gradeLevel,
     }
-    await setDoc(doc(db, "users", cred.user.uid), userProfile)
-    setUser(cred.user)
+    recordId.current = uid
+    setUser({ uid, email: data.email })
     setProfile(userProfile)
     currentEmail.current = data.email
     saveCreds(data.email, data.password)
+    logActivity({ user: data.email, action: "Registration", detail: "New student account registered" })
     return userProfile
   }
 
   const logout = async () => {
     clearCreds()
     currentEmail.current = null
-    await signOut(auth)
+    recordId.current = null
+    pb.authStore.clear()
     setUser(null)
     setProfile(null)
   }
@@ -192,7 +189,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateProfile = async (data: Partial<Pick<UserProfile, "displayName" | "email" | "lrn" | "gradeLevel" | "phone" | "employeeId" | "department" | "joinDate">>) => {
     if (!user || !profile) return
     const updated = { ...profile, ...data }
-    await updateDoc(doc(db, "users", user.uid), data)
+    const id = recordId.current
+    if (id) {
+      await pb.collection("users").update(id, {
+        name: data.displayName ?? profile.displayName,
+        email: data.email ?? profile.email,
+        lrn: data.lrn ?? profile.lrn ?? "",
+        gradeLevel: data.gradeLevel ?? profile.gradeLevel ?? "",
+        phone: data.phone ?? profile.phone ?? "",
+        employeeId: data.employeeId ?? profile.employeeId ?? "",
+        department: data.department ?? profile.department ?? "",
+        joinDate: data.joinDate ?? profile.joinDate ?? "",
+      })
+    }
     setProfile(updated)
   }
 

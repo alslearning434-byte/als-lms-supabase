@@ -8,8 +8,7 @@ import ChangePasswordModal from "../components/ChangePasswordModal"
 import AssessmentTaker from "../components/AssessmentTaker"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
-import { db } from "../firebase"
-import { collection, getDocs, doc, getDoc, setDoc, addDoc, serverTimestamp, query, where } from "firebase/firestore"
+import { pb, upsertModuleProgress } from "../pocketbase"
 import type { NavItem, Resource, ModuleTask } from "../types"
 import { getSubjectIcon } from "../utils/subjectIcons"
 import ImageCarousel from "../components/ImageCarousel"
@@ -65,9 +64,19 @@ export default function Student() {
   const [updatingSubKey, setUpdatingSubKey] = useState<string | null>(null)
   const [leaderboardData, setLeaderboardData] = useState<{ classRanks: LeaderboardEntry[]; batchRanks: LeaderboardEntry[] }>({ classRanks: [], batchRanks: [] })
   const [leaderboardLoading, setLeaderboardLoading] = useState(true)
+  const [lbStudents, setLbStudents] = useState<Record<string, { displayName: string; gradeLevel: string }>>({})
+  const [lbModuleCounts, setLbModuleCounts] = useState<Record<string, number>>({})
+  const [lbQuizStats, setLbQuizStats] = useState<Record<string, { total: number; count: number }>>({})
   const [classPage, setClassPage] = useState(1)
   const [batchPage, setBatchPage] = useState(1)
   const PER_PAGE = 5
+  const activeModulesScrollRef = useRef<HTMLDivElement>(null)
+  const activeModulesDrag = useRef<{ active: boolean; pointerId: number; startX: number; startScrollLeft: number } | null>(null)
+  const activeModulesDragMoved = useRef(false)
+  const [activeModuleFrame, setActiveModuleFrame] = useState(0)
+  const [cardsPerPage, setCardsPerPage] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches ? 2 : 1
+  )
 
   const t = (text: string): string => {
     if (language !== "tl") return text
@@ -261,80 +270,101 @@ export default function Student() {
   const isDark = theme === "dark"
 
   useEffect(() => {
-    (async () => {
+    const uid = user?.uid
+    const unsubs: (() => void)[] = []
+
+    const loadResources = async () => {
       try {
-        const snap = await getDocs(collection(db, "resources"))
-        const fetched: Resource[] = snap.docs.map((d) => {
-          const data = d.data()
-          return {
-            id: d.id,
-            subject: data.subject || "",
-            title: data.title || "",
-            description: data.description || "",
-            modules: data.modules || [],
-            assessment: data.assessment || undefined,
-            uploadedBy: data.uploadedBy || "",
-            uploadedAt: data.uploadedAt || "",
+        const items = await pb.collection("resources").getFullList()
+        const fetched: Resource[] = items.map((d) => ({
+          id: d.id,
+          subject: d.subject || "",
+          title: d.title || "",
+          description: d.description || "",
+          modules: d.modules || [],
+          assessment: d.assessment || undefined,
+          uploadedBy: d.uploadedBy || "",
+          uploadedAt: d.uploadedAt || "",
+        }))
+        setResources(fetched)
+      } catch { /* offline */ }
+    }
+
+    const loadMyProgress = async () => {
+      if (!uid) return
+      try {
+        const items = await pb.collection("moduleProgress").getFullList()
+        const pMap: Record<string, number[]> = {}
+        items.forEach((d) => {
+          if (d.userId !== uid) return
+          pMap[d.resourceId] = d.viewedModules || []
+        })
+        setProgressMap(pMap)
+      } catch { /* offline */ }
+    }
+
+    const loadMyAssessmentSubs = async () => {
+      if (!uid) return
+      try {
+        const items = await pb.collection("assessmentSubmissions").getFullList()
+        const subs: Record<string, { score: number; totalPoints: number }> = {}
+        items.forEach((d) => {
+          if (d.studentId !== uid) return
+          subs[d.resourceId] = { score: d.score, totalPoints: d.totalPoints }
+        })
+        setAssessmentSubmissions(subs)
+      } catch { /* offline */ }
+    }
+
+    const loadMyQuizSubs = async () => {
+      if (!uid) return
+      try {
+        const items = await pb.collection("quizSubmissions").getFullList()
+        const qsubs: Record<string, { score: number; total: number; passed: boolean }> = {}
+        items.forEach((d) => {
+          if (d.studentId !== uid) return
+          const key = `${d.resourceId}_${d.moduleIdx}`
+          if (!qsubs[key] || d.passed) {
+            qsubs[key] = { score: d.score, total: d.total, passed: d.passed }
           }
         })
-        setResources(fetched)
+        setQuizSubmissions(qsubs)
+      } catch { /* offline */ }
+    }
 
-        if (user?.uid && fetched.length > 0) {
-          const pMap: Record<string, number[]> = {}
-          await Promise.all(fetched.map(async (r) => {
-            try {
-              const pSnap = await getDoc(doc(db, "moduleProgress", `${user.uid}_${r.id}`))
-              if (pSnap.exists()) {
-                pMap[r.id] = pSnap.data().viewedModules || []
-              }
-            } catch { /* offline */ }
-          }))
-          setProgressMap(pMap)
-        }
+    const loadMyAssignmentSubs = async () => {
+      if (!uid) return
+      try {
+        const items = await pb.collection("assignmentSubmissions").getFullList()
+        const asubs: Record<string, { fileName: string; note: string; submittedAt: string }> = {}
+        items.forEach((d) => {
+          if (d.studentId !== uid) return
+          const key = `${d.resourceId}_${d.moduleIdx}_${d.taskId}`
+          asubs[key] = { fileName: d.fileName || "", note: d.note || "", submittedAt: d.submittedAt || "" }
+        })
+        setAssignmentSubs(asubs)
+      } catch { /* offline */ }
+    }
 
-        if (user?.uid) {
-          try {
-            const subSnap = await getDocs(collection(db, "assessmentSubmissions"))
-            const subs: Record<string, { score: number; totalPoints: number }> = {}
-            subSnap.docs.forEach((d) => {
-              const data = d.data()
-              if (data.studentId === user.uid) {
-                subs[data.resourceId] = { score: data.score, totalPoints: data.totalPoints }
-              }
-            })
-            setAssessmentSubmissions(subs)
-          } catch { /* offline */ }
-          try {
-            const qSnap = await getDocs(collection(db, "quizSubmissions"))
-            const qsubs: Record<string, { score: number; total: number; passed: boolean }> = {}
-            qSnap.docs.forEach((d) => {
-              const data = d.data()
-              if (data.studentId === user.uid) {
-                const key = `${data.resourceId}_${data.moduleIdx}`
-                if (!qsubs[key] || data.passed) {
-                  qsubs[key] = { score: data.score, total: data.total, passed: data.passed }
-                }
-              }
-            })
-            setQuizSubmissions(qsubs)
-          } catch { /* offline */ }
-          try {
-            const aSnap = await getDocs(collection(db, "assignmentSubmissions"))
-            const asubs: Record<string, { fileName: string; note: string; submittedAt: string }> = {}
-            aSnap.docs.forEach((d) => {
-              const data = d.data()
-              if (data.studentId === user.uid) {
-                const key = `${data.resourceId}_${data.moduleIdx}_${data.taskId}`
-                asubs[key] = { fileName: data.fileName || "", note: data.note || "", submittedAt: data.submittedAt || "" }
-              }
-            })
-            setAssignmentSubs(asubs)
-          } catch { /* offline */ }
-        }
-      } catch (err) {
-        console.error("Failed to fetch resources:", err)
-      }
-    })()
+    loadResources()
+    loadMyProgress()
+    loadMyAssessmentSubs()
+    loadMyQuizSubs()
+    loadMyAssignmentSubs()
+
+    const subscribeAll = async () => {
+      try {
+        const u1 = await pb.collection("resources").subscribe("*", () => { loadResources() })
+        const u2 = await pb.collection("moduleProgress").subscribe("*", () => { loadMyProgress() })
+        const u3 = await pb.collection("assessmentSubmissions").subscribe("*", () => { loadMyAssessmentSubs() })
+        const u4 = await pb.collection("quizSubmissions").subscribe("*", () => { loadMyQuizSubs() })
+        const u5 = await pb.collection("assignmentSubmissions").subscribe("*", () => { loadMyAssignmentSubs() })
+        unsubs.push(u1, u2, u3, u4, u5)
+      } catch { /* realtime unavailable */ }
+    }
+    subscribeAll()
+
+    return () => { unsubs.forEach((u) => { try { u() } catch { /* ignore */ } }) }
   }, [user])
 
   useEffect(() => {
@@ -350,112 +380,212 @@ export default function Student() {
   }, [congratsTarget, activePage])
 
   useEffect(() => {
-    if (resources.length === 0 || !user) return
-    let cancelled = false
-    ;(async () => {
+    const mq = window.matchMedia("(min-width: 1024px)")
+    const update = () => setCardsPerPage(mq.matches ? 2 : 1)
+    update()
+    mq.addEventListener("change", update)
+    return () => mq.removeEventListener("change", update)
+  }, [])
+
+  const measureActiveModuleStep = () => {
+    const el = activeModulesScrollRef.current
+    if (!el || !el.children.length) return 0
+    const first = el.children[0] as HTMLElement
+    const second = el.children[1] as HTMLElement | undefined
+    return second ? second.offsetLeft - first.offsetLeft : first.offsetWidth
+  }
+
+  const handleActiveModulesScroll = () => {
+    const el = activeModulesScrollRef.current
+    if (!el || !el.children.length) return
+    const step = measureActiveModuleStep()
+    if (step <= 0) return
+    const totalFrames = Math.max(1, el.children.length - cardsPerPage + 1)
+    const idx = Math.round(el.scrollLeft / step)
+    setActiveModuleFrame(Math.max(0, Math.min(totalFrames - 1, idx)))
+  }
+
+  const scrollActiveModulesToFrame = (frame: number) => {
+    const el = activeModulesScrollRef.current
+    if (!el) return
+    const step = measureActiveModuleStep()
+    if (step <= 0) return
+    el.scrollTo({ left: frame * step, behavior: "smooth" })
+  }
+
+  const handleActiveModulesPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== "mouse") return
+    const el = activeModulesScrollRef.current
+    if (!el) return
+    activeModulesDragMoved.current = false
+    activeModulesDrag.current = { active: true, pointerId: e.pointerId, startX: e.clientX, startScrollLeft: el.scrollLeft }
+    el.setPointerCapture(e.pointerId)
+    el.style.scrollSnapType = "none"
+    e.preventDefault()
+  }
+
+  const handleActiveModulesPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = activeModulesDrag.current
+    if (!drag || !drag.active || e.pointerId !== drag.pointerId) return
+    const el = activeModulesScrollRef.current
+    if (!el) return
+    const dx = e.clientX - drag.startX
+    if (Math.abs(dx) > 5) activeModulesDragMoved.current = true
+    el.scrollLeft = drag.startScrollLeft - dx
+  }
+
+  const endActiveModulesDrag = () => {
+    const drag = activeModulesDrag.current
+    const el = activeModulesScrollRef.current
+    activeModulesDrag.current = null
+    if (!drag || !drag.active) return
+    if (el) {
+      if (activeModulesDragMoved.current) {
+        const step = measureActiveModuleStep()
+        if (step > 0) {
+          const totalFrames = Math.max(1, el.children.length - cardsPerPage + 1)
+          const idx = Math.max(0, Math.min(totalFrames - 1, Math.round(el.scrollLeft / step)))
+          el.scrollTo({ left: idx * step, behavior: "smooth" })
+        }
+      }
+      el.style.scrollSnapType = ""
+      try { el.releasePointerCapture(drag.pointerId) } catch { /* already released */ }
+    }
+  }
+
+  const handleActiveModulesClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (activeModulesDragMoved.current) {
+      e.preventDefault()
+      e.stopPropagation()
+      activeModulesDragMoved.current = false
+    }
+  }
+
+  useEffect(() => {
+    setActiveModuleFrame(0)
+  }, [resources, progressMap])
+
+  useEffect(() => {
+    if (!user) return
+    const unsubs: (() => void)[] = []
+
+    const loadStudents = async () => {
       try {
-        setLeaderboardLoading(true)
-        const usersSnap = await getDocs(query(collection(db, "users"), where("role", "==", "student")))
+        const items = await pb.collection("users").getFullList()
         const studentMap: Record<string, { displayName: string; gradeLevel: string }> = {}
-        usersSnap.docs.forEach(d => {
-          const data = d.data()
-          studentMap[d.id] = { displayName: data.displayName || "Unknown", gradeLevel: data.gradeLevel || "Section A" }
+        items.forEach((d) => {
+          if (d.role !== "student") return
+          studentMap[d.uid] = { displayName: d.name || "Unknown", gradeLevel: d.gradeLevel || "Section A" }
         })
+        setLbStudents(studentMap)
+      } catch { /* offline */ }
+    }
 
-        const mpSnap = await getDocs(collection(db, "moduleProgress"))
+    const loadModuleCounts = async () => {
+      try {
+        const items = await pb.collection("moduleProgress").getFullList()
         const moduleCounts: Record<string, number> = {}
-        mpSnap.docs.forEach(d => {
-          const data = d.data()
-          const uid = data.userId
-          if (uid) moduleCounts[uid] = (moduleCounts[uid] || 0) + (data.viewedModules?.length || 0)
+        items.forEach((d) => {
+          const docUid = d.userId
+          if (docUid) moduleCounts[docUid] = (moduleCounts[docUid] || 0) + (d.viewedModules?.length || 0)
         })
+        setLbModuleCounts(moduleCounts)
+      } catch { /* offline */ }
+    }
 
-        const qSnap = await getDocs(collection(db, "quizSubmissions"))
+    const loadQuizStats = async () => {
+      try {
+        const items = await pb.collection("quizSubmissions").getFullList()
         const quizStats: Record<string, { total: number; count: number }> = {}
-        qSnap.docs.forEach(d => {
-          const data = d.data()
-          const uid = data.studentId
-          if (uid) {
-            if (!quizStats[uid]) quizStats[uid] = { total: 0, count: 0 }
-            quizStats[uid].total += (data.score / data.total) * 100
-            quizStats[uid].count++
+        items.forEach((d) => {
+          const docUid = d.studentId
+          if (docUid) {
+            if (!quizStats[docUid]) quizStats[docUid] = { total: 0, count: 0 }
+            quizStats[docUid].total += (d.score / d.total) * 100
+            quizStats[docUid].count++
           }
         })
+        setLbQuizStats(quizStats)
+      } catch { /* offline */ }
+    }
 
-        const totalMods = resources.reduce((sum, r) => sum + (r.modules?.length || 0), 0)
-        if (totalMods === 0) return
+    loadStudents()
+    loadModuleCounts()
+    loadQuizStats()
 
-        const entries: { uid: string; displayName: string; gradeLevel: string; overallScore: number }[] = []
+    const subscribeLeaderboard = async () => {
+      try {
+        const u1 = await pb.collection("users").subscribe("*", () => { loadStudents() })
+        const u2 = await pb.collection("moduleProgress").subscribe("*", () => { loadModuleCounts() })
+        const u3 = await pb.collection("quizSubmissions").subscribe("*", () => { loadQuizStats() })
+        unsubs.push(u1, u2, u3)
+      } catch { /* realtime unavailable */ }
+    }
+    subscribeLeaderboard()
 
-        Object.entries(studentMap).forEach(([uid, info]) => {
-          const viewed = moduleCounts[uid] || 0
-          const completionPct = Math.round((viewed / totalMods) * 100)
-          const qs = quizStats[uid]
-          const avgQuizPct = qs && qs.count > 0 ? Math.round(qs.total / qs.count) : 0
-          const overallScore = Math.round(completionPct * 0.50 + avgQuizPct * 0.30)
-          entries.push({ uid, ...info, overallScore })
-        })
+    return () => { unsubs.forEach((u) => { try { u() } catch { /* ignore */ } }) }
+  }, [user])
 
-        entries.sort((a, b) => b.overallScore - a.overallScore)
+  useEffect(() => {
+    if (resources.length === 0 || !user) return
+    const totalMods = resources.reduce((sum, r) => sum + (r.modules?.length || 0), 0)
+    if (totalMods === 0) {
+      setLeaderboardData({ classRanks: [], batchRanks: [] })
+      setLeaderboardLoading(false)
+      return
+    }
 
-        const myGradeLevel = profile?.gradeLevel || ""
+    const entries: { uid: string; displayName: string; gradeLevel: string; overallScore: number }[] = []
 
-        const toEntry = (e: typeof entries[number], rank: number, isHighlight: boolean): LeaderboardEntry => ({
-          rank,
-          initials: e.displayName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() || "?",
-          name: e.displayName,
-          section: e.gradeLevel || "Section A",
-          score: `${e.overallScore}%`,
-          scoreColor: e.overallScore >= 70 ? "text-green-600" : e.overallScore >= 40 ? "text-amber-600" : "text-rose-600",
-          highlight: isHighlight,
-          rankBg: rank === 1 ? "bg-yellow-400" : rank === 2 ? "bg-gray-400" : rank === 3 ? "bg-amber-700" : "bg-gray-300"
-        })
+    Object.entries(lbStudents).forEach(([uid, info]) => {
+      const viewed = lbModuleCounts[uid] || 0
+      const completionPct = Math.round((viewed / totalMods) * 100)
+      const qs = lbQuizStats[uid]
+      const avgQuizPct = qs && qs.count > 0 ? Math.round(qs.total / qs.count) : 0
+      const overallScore = Math.round(completionPct * 0.50 + avgQuizPct * 0.30)
+      entries.push({ uid, ...info, overallScore })
+    })
 
-        if (!cancelled) {
-          setLeaderboardData({
-            classRanks: entries.filter(e => e.gradeLevel === myGradeLevel).map((e, i) => toEntry(e, i + 1, e.uid === user.uid)),
-            batchRanks: entries.map((e, i) => toEntry(e, i + 1, e.uid === user.uid))
-          })
-        }
-      } catch (err) {
-        console.error("Failed to fetch leaderboard data:", err)
-      } finally {
-        if (!cancelled) setLeaderboardLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [resources, user, profile])
+    entries.sort((a, b) => b.overallScore - a.overallScore)
+
+    const myGradeLevel = profile?.gradeLevel || ""
+
+    const toEntry = (e: typeof entries[number], rank: number, isHighlight: boolean): LeaderboardEntry => ({
+      rank,
+      initials: e.displayName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() || "?",
+      name: e.displayName,
+      section: e.gradeLevel || "Section A",
+      score: `${e.overallScore}%`,
+      scoreColor: e.overallScore >= 70 ? "text-green-600" : e.overallScore >= 40 ? "text-amber-600" : "text-rose-600",
+      highlight: isHighlight,
+      rankBg: rank === 1 ? "bg-yellow-400" : rank === 2 ? "bg-gray-400" : rank === 3 ? "bg-amber-700" : "bg-gray-300"
+    })
+
+    setLeaderboardData({
+      classRanks: entries.filter(e => e.gradeLevel === myGradeLevel).map((e, i) => toEntry(e, i + 1, e.uid === user.uid)),
+      batchRanks: entries.map((e, i) => toEntry(e, i + 1, e.uid === user.uid))
+    })
+    setLeaderboardLoading(false)
+  }, [resources, user, profile, lbStudents, lbModuleCounts, lbQuizStats])
 
   const markModuleViewed = async (resourceId: string, moduleIdx: number) => {
     if (!user?.uid) return
-    const key = `${user.uid}_${resourceId}`
     const current = progressMap[resourceId] || []
     if (current.includes(moduleIdx)) return
     const updated = [...current, moduleIdx]
     setProgressMap(prev => ({ ...prev, [resourceId]: updated }))
     try {
-      await setDoc(doc(db, "moduleProgress", key), {
-        userId: user.uid,
-        resourceId,
-        viewedModules: updated,
-        lastViewedAt: serverTimestamp(),
-      })
+      await upsertModuleProgress(user.uid, resourceId, updated)
     } catch { /* offline */ }
   }
 
   const markModuleUnread = async (resourceId: string, moduleIdx: number) => {
     if (!user?.uid) return
-    const key = `${user.uid}_${resourceId}`
     const current = progressMap[resourceId] || []
     const updated = current.filter((i) => i !== moduleIdx)
     setProgressMap(prev => ({ ...prev, [resourceId]: updated }))
     try {
-      await setDoc(doc(db, "moduleProgress", key), {
-        userId: user.uid,
-        resourceId,
-        viewedModules: updated,
-        lastViewedAt: serverTimestamp(),
-      })
+      await upsertModuleProgress(user.uid, resourceId, updated)
     } catch { /* offline */ }
   }
 
@@ -687,52 +817,77 @@ export default function Student() {
                           <p className="text-xs text-gray-400 mt-1">{t("Start a module from My Modules page")}</p>
                         </div>
                       ) : (
-                        <div className="overflow-x-auto flex-1 -mx-1 px-1 scrollbar-thin"
-                          style={{ scrollSnapType: "x mandatory" }}>
-                          <div className="flex gap-4 pb-2">
-                            {activeRes.map((r, i) => {
-                              const c = colorCycle[i % colorCycle.length]
-                              const pct = Math.round((r.viewed.length / r.total) * 100)
-                              const currentMod = r.resource.modules[r.viewed.length] || r.resource.modules[r.total - 1]
-                              const subjIcon = getSubjectIcon(r.resource.subject)
-                              return (
-                                <div key={r.resource.id} className="flex-shrink-0 w-72" style={{ scrollSnapAlign: "start" }}>
-                                  <div className="module-card p-0 flex flex-col h-full overflow-hidden !border-0">
-                                    <div className="p-5 flex flex-col flex-1">
-                                      <div className="flex items-start gap-3 mb-3">
-                                        <div className={`w-11 h-11 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0 shadow-sm`}>
-                                          <i className={`fas ${subjIcon.icon} text-base`} />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                          <p className={`text-[10px] font-bold uppercase tracking-wider ${subjIcon.color}`}>{r.resource.subject}</p>
-                                          <h4 className="font-semibold text-gray-800 text-base leading-tight truncate">{r.resource.title}</h4>
-                                        </div>
-                                        <span className={`text-xs font-bold ${c.labelColor} ${c.bg} px-2 py-0.5 rounded whitespace-nowrap`}>{pct}%</span>
+                        <>
+                        <div
+                          ref={activeModulesScrollRef}
+                          className="flex overflow-x-auto flex-1 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden snap-x snap-mandatory gap-5 pr-4 pb-2 h-full select-none cursor-grab active:cursor-grabbing"
+                          onScroll={handleActiveModulesScroll}
+                          onPointerDown={handleActiveModulesPointerDown}
+                          onPointerMove={handleActiveModulesPointerMove}
+                          onPointerUp={endActiveModulesDrag}
+                          onPointerCancel={endActiveModulesDrag}
+                          onClickCapture={handleActiveModulesClickCapture}
+                        >
+                          {activeRes.map((r, i) => {
+                            const c = colorCycle[i % colorCycle.length]
+                            const pct = Math.round((r.viewed.length / r.total) * 100)
+                            const currentMod = r.resource.modules[r.viewed.length] || r.resource.modules[r.total - 1]
+                            const subjIcon = getSubjectIcon(r.resource.subject)
+                            return (
+                              <div key={r.resource.id} className="w-full lg:w-[calc(50%-0.625rem)] shrink-0 snap-start h-full">
+                                <div className="module-card p-0 flex flex-col h-full overflow-hidden !border-0">
+                                  <div className="p-5 flex flex-col flex-1">
+                                    <div className="flex items-start gap-3 mb-3">
+                                      <div className={`w-11 h-11 rounded-xl ${subjIcon.bg} ${subjIcon.color} flex items-center justify-center shrink-0 shadow-sm`}>
+                                        <i className={`fas ${subjIcon.icon} text-base`} />
                                       </div>
-                                      <p className="text-sm text-gray-400 truncate mb-4">{t("Current:")} {currentMod?.name || `Module ${r.viewed.length + 1}`}</p>
-                                      <div className="mt-auto">
-                                        <div className="flex items-center justify-between mb-1.5">
-                                          <span className="text-xs font-medium text-gray-500">{r.viewed.length} {t("of")} {r.total} {t("modules")}</span>
-                                          <span className={`text-xs font-semibold ${c.labelColor}`}>{pct}% {t("complete")}</span>
-                                        </div>
-                                        <div className="progress-bar h-2.5 mb-4">
-                                          <div className={`progress-fill ${c.color}`} style={{ width: `${pct}%` }} />
-                                        </div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className={`text-[10px] font-bold uppercase tracking-wider ${subjIcon.color}`}>{r.resource.subject}</p>
+                                        <h4 className="font-semibold text-gray-800 text-base leading-tight truncate">{r.resource.title}</h4>
                                       </div>
-                                      <button onClick={() => {
-                                        const idx = firstUnviewedIdx(r)
-                                        setViewContent({ resource: r.resource, moduleIdx: idx })
-                                        goTo("modules")
-                                      }} className="w-full py-2.5 bg-navy-400 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 hover:bg-navy-500 transition">
-                                        {t("Continue Lesson")} <i className="fas fa-arrow-right text-xs" />
-                                      </button>
+                                      <span className={`text-xs font-bold ${c.labelColor} ${c.bg} px-2 py-0.5 rounded whitespace-nowrap`}>{pct}%</span>
                                     </div>
+                                    <p className="text-sm text-gray-400 truncate mb-4">{t("Current:")} {currentMod?.name || `Module ${r.viewed.length + 1}`}</p>
+                                    <div className="mt-auto">
+                                      <div className="flex items-center justify-between mb-1.5">
+                                        <span className="text-xs font-medium text-gray-500">{r.viewed.length} {t("of")} {r.total} {t("modules")}</span>
+                                        <span className={`text-xs font-semibold ${c.labelColor}`}>{pct}% {t("complete")}</span>
+                                      </div>
+                                      <div className="progress-bar h-2.5 mb-4">
+                                        <div className={`progress-fill ${c.color}`} style={{ width: `${pct}%` }} />
+                                      </div>
+                                    </div>
+                                    <button onClick={() => {
+                                      const idx = firstUnviewedIdx(r)
+                                      setViewContent({ resource: r.resource, moduleIdx: idx })
+                                      goTo("modules")
+                                    }} className="w-full py-2.5 bg-navy-400 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 hover:bg-navy-500 transition">
+                                      {t("Continue Lesson")} <i className="fas fa-arrow-right text-xs" />
+                                    </button>
                                   </div>
                                 </div>
-                              )
-                            })}
-                          </div>
+                              </div>
+                            )
+                          })}
                         </div>
+                        {activeRes.length > cardsPerPage && (
+                          <div className="flex justify-center gap-2 pt-3">
+                            {Array.from({ length: Math.max(1, activeRes.length - cardsPerPage + 1) }).map((_, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => scrollActiveModulesToFrame(idx)}
+                                aria-label={t(`Go to slide ${idx + 1}`)}
+                                className={`transition-all duration-300 rounded-full ${
+                                  idx === activeModuleFrame
+                                    ? "w-6 h-2.5 bg-navy-500"
+                                    : "w-2.5 h-2.5 bg-gray-300 hover:bg-gray-400"
+                                }`}
+                              />
+                            ))}
+                          </div>
+                        )}
+                        </>
                       )}
                     </div>
                   )
@@ -2189,16 +2344,22 @@ export default function Student() {
                       <button onClick={async () => {
                         if (!taskFile) return
                         try {
-                          const docId = `${user?.uid}_${r.id}_${moduleIdx}_${task.id}`
-                          await setDoc(doc(db, "assignmentSubmissions", docId), {
-                            studentId: user?.uid || "",
+                          const sid = user?.uid || ""
+                          const existing = await pb.collection("assignmentSubmissions").getFirstListItem(
+                            pb.filter("studentId = {:sid} && resourceId = {:rid} && taskId = {:tid}", { sid, rid: r.id, tid: task.id }),
+                            { requestKey: null }
+                          ).catch(() => null)
+                          const payload = {
+                            studentId: sid,
                             resourceId: r.id,
                             moduleIdx,
                             taskId: task.id,
                             fileName: taskFile.name,
                             note: taskNote,
                             submittedAt: new Date().toISOString(),
-                          })
+                          }
+                          if (existing) await pb.collection("assignmentSubmissions").update(existing.id, payload)
+                          else await pb.collection("assignmentSubmissions").create(payload)
                           setAssignmentSubs(prev => ({ ...prev, [subKey]: { fileName: taskFile.name, note: taskNote, submittedAt: new Date().toISOString() } }))
                           setTaskFile(null)
                           setTaskNote("")
@@ -2370,7 +2531,7 @@ function ModuleModal({ resource, viewedModules, quizSubmissions, onClose, onView
               />
             </div>
           </div>
-        )}
+            )}
 
         {/* Module list */}
         <div className="p-4 max-h-[55vh] overflow-y-auto">
