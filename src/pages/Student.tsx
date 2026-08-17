@@ -3152,12 +3152,17 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
             const isSelected = day === selected
             const isPast = year < today.getFullYear() || (year === today.getFullYear() && month < today.getMonth()) || (year === today.getFullYear() && month === today.getMonth() && day < today.getDate())
             const hasEvents = (events[String(day)]?.length ?? 0) > 0 || (announcements[`${year}-${month}-${day}`]?.length ?? 0) > 0
+            const totalCount = (events[String(day)]?.length ?? 0) + (announcements[`${year}-${month}-${day}`]?.length ?? 0)
             return (
               <button key={day} onClick={() => !isPast && setSelected(day)} disabled={isPast}
                 className={`flex flex-col items-center justify-center rounded-lg text-sm font-medium transition relative min-h-[48px]
                   ${isPast ? "text-gray-300 cursor-not-allowed" : isSelected ? "bg-navy-500 text-white shadow-md shadow-navy-500/25 z-10" : isToday ? "bg-navy-50 text-navy-700 font-bold ring-2 ring-navy-200" : "hover:bg-gray-50 text-gray-700"}`}>
                 <span>{day}</span>
-                {hasEvents && <span className={`absolute bottom-1 w-1.5 h-1.5 rounded-full ${isSelected ? "bg-white" : "bg-navy-500"}`} />}
+                {hasEvents && (
+                  totalCount > 1
+                    ? <span className={`absolute bottom-2 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold flex items-center justify-center leading-none ${isSelected ? "bg-white text-navy-500" : "bg-navy-500 text-white"}`}>{totalCount}</span>
+                    : <span className={`absolute bottom-2 w-1.5 h-1.5 rounded-full ${isSelected ? "bg-white" : "bg-navy-500"}`} />
+                )}
               </button>
             )
           })}
