@@ -94,19 +94,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const recordId = useRef<string | null>(null)
   const currentEmail = useRef<string | null>(null)
 
+  const restored = useRef(false)
+
   useEffect(() => {
+    if (restored.current) return
+    restored.current = true
     const restore = async () => {
       if (pb.authStore.isValid) {
         try {
-          const res = await pb.collection("users").authRefresh()
+          const res = await pb.collection("users").authRefresh({ requestKey: null })
           const rec = res.record
           const p = recordToProfile(rec)
           recordId.current = rec.id
           currentEmail.current = p.email
           setUser({ uid: p.uid, email: p.email })
           setProfile(p)
-        } catch {
-          pb.authStore.clear()
+        } catch (err) {
+          const status = (err as { status?: number })?.status
+          if (status === 401 || status === 403) pb.authStore.clear()
         }
       }
       setLoading(false)

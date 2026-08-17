@@ -133,6 +133,7 @@ export interface Resource {
   subject: string
   title: string
   description: string
+  targetGrade?: string
   modules: ModuleContent[]
   assessment?: ModuleAssessment
   uploadedBy: string

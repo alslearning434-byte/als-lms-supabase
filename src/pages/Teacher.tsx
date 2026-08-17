@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import BlockEditor from "../components/BlockEditor"
 import AssessmentBuilder from "../components/AssessmentBuilder"
@@ -25,6 +25,26 @@ const navItems: NavItem[] = [
   { id: "calendar", label: "Calendar", icon: "calendar-alt" },
   { id: "profile", label: "Profile", icon: "user-circle" }
 ]
+
+const categoryStyles: Record<string, string> = {
+  General: "bg-gray-100 text-gray-600",
+  Holiday: "bg-green-100 text-green-600",
+  Exam: "bg-red-100 text-red-600",
+  Event: "bg-blue-100 text-blue-600",
+  Meeting: "bg-purple-100 text-purple-600",
+}
+
+function cohortFromGrade(gradeLevel: string | undefined | null): "jhs" | "shs" | null {
+  if (!gradeLevel) return null
+  const normalized = String(gradeLevel).toLowerCase()
+  if (normalized.includes("senior") || normalized.includes("grade 11") || normalized.includes("grade 12")) return "shs"
+  if (normalized.includes("junior") || normalized.includes("grade 7") || normalized.includes("grade 8") || normalized.includes("grade 9") || normalized.includes("grade 10")) return "jhs"
+  const grade = parseInt(normalized.replace(/\D/g, ""), 10)
+  if (isNaN(grade)) return null
+  return grade >= 11 ? "shs" : "jhs"
+}
+
+type StudentEntry = { uid: string; name: string; email: string; gradeLevel: string; cohort: "jhs" | "shs" | null }
 
 export default function Teacher() {
   const makeEmptyModule = (): ModuleContent => ({
@@ -81,6 +101,9 @@ export default function Teacher() {
   const [subAssign, setSubAssign] = useState<any[]>([])
   const [subQuiz, setSubQuiz] = useState<any[]>([])
   const [subAssess, setSubAssess] = useState<any[]>([])
+  const [moduleProgress, setModuleProgress] = useState<any[]>([])
+  const [students, setStudents] = useState<StudentEntry[]>([])
+  const [announcements, setAnnouncements] = useState<Record<string, { id: string; text: string; category: string }[]>>({})
   const [resSubject, setResSubject] = useState("")
   const [resTitle, setResTitle] = useState("")
   const [resDesc, setResDesc] = useState("")
@@ -213,6 +236,7 @@ export default function Teacher() {
             subject: data.subject || "",
             title: data.title || "",
             description: data.description || "",
+            targetGrade: data.targetGrade || "",
             uploadedBy: data.uploadedBy || "",
             uploadedAt: data.uploadedAt || "",
             modules: (data.modules || []).map((m: any) => {
@@ -272,9 +296,11 @@ export default function Teacher() {
         const assign = await pb.collection("assignmentSubmissions").getFullList()
         const quiz = await pb.collection("quizSubmissions").getFullList()
         const assess = await pb.collection("assessmentSubmissions").getFullList()
+        const progress = await pb.collection("moduleProgress").getFullList()
         setSubAssign(assign.map((d) => ({ ...d })))
         setSubQuiz(quiz.map((d) => ({ ...d })))
         setSubAssess(assess.map((d) => ({ ...d })))
+        setModuleProgress(progress.map((d) => ({ ...d })))
       } catch { /* offline */ }
     }
 
@@ -287,7 +313,8 @@ export default function Teacher() {
         const u2 = await pb.collection("assignmentSubmissions").subscribe("*", () => { loadSubmissions() })
         const u3 = await pb.collection("quizSubmissions").subscribe("*", () => { loadSubmissions() })
         const u4 = await pb.collection("assessmentSubmissions").subscribe("*", () => { loadSubmissions() })
-        unsubs.push(u1, u2, u3, u4)
+        const u5 = await pb.collection("moduleProgress").subscribe("*", () => { loadSubmissions() })
+        unsubs.push(u1, u2, u3, u4, u5)
       } catch { /* realtime unavailable */ }
     }
     subscribe()
@@ -346,6 +373,95 @@ export default function Teacher() {
     setRecentSubmissions(entries.slice(0, 6))
   }, [resources, subUsers, subAssign, subQuiz, subAssess])
 
+  const analytics = useMemo(() => {
+    const taskCounts: Record<"jhs" | "shs", Record<string, number>> = {
+      jhs: { assignment: 0, quiz: 0, discussion: 0, material: 0 },
+      shs: { assignment: 0, quiz: 0, discussion: 0, material: 0 },
+    }
+    resources.forEach((r) => {
+      const rc = cohortFromGrade(r.targetGrade) || (r.subject?.toLowerCase().includes("shs") ? "shs" : "jhs")
+      if (!rc) return
+      r.modules?.forEach((m) => m.tasks?.forEach((t) => {
+        if (taskCounts[rc][t.type] !== undefined) taskCounts[rc][t.type]++
+      }))
+    })
+
+    const studentCohort: Record<string, "jhs" | "shs" | null> = {}
+    students.forEach((s) => { studentCohort[s.uid] = s.cohort })
+
+    const completed: Record<"jhs" | "shs", Record<string, number>> = {
+      jhs: { assignment: 0, quiz: 0, discussion: 0, material: 0 },
+      shs: { assignment: 0, quiz: 0, discussion: 0, material: 0 },
+    }
+    const byStudent: Record<string, number> = {}
+
+    const addSub = (studentId: string, type: string) => {
+      const c = studentCohort[studentId]
+      if (!c) return
+      if (completed[c][type] !== undefined) completed[c][type]++
+      byStudent[studentId] = (byStudent[studentId] || 0) + 1
+    }
+    subAssign.forEach((d) => addSub(d.studentId, "assignment"))
+    subQuiz.forEach((d) => addSub(d.studentId, "quiz"))
+    subAssess.forEach((d) => { if (d.type === "discussion") addSub(d.studentId, "discussion") })
+    moduleProgress.forEach((d) => { if (d.progress === 100 || d.completedAt) addSub(d.userId, "material") })
+
+    const cohortData = (c: "jhs" | "shs") => {
+      const tasksPerStudent = Object.values(taskCounts[c]).reduce((a, b) => a + b, 0)
+      const cohortStudents = students.filter((s) => s.cohort === c).length
+      const assigned = tasksPerStudent * cohortStudents
+      const done = Object.values(completed[c]).reduce((a, b) => a + b, 0)
+      return {
+        students: cohortStudents,
+        assigned,
+        completed: done,
+        rate: assigned > 0 ? parseFloat(((done / assigned) * 100).toFixed(1)) : 0,
+      }
+    }
+
+    const jhs = cohortData("jhs")
+    const shs = cohortData("shs")
+    const totalAssigned = jhs.assigned + shs.assigned
+    const totalCompleted = jhs.completed + shs.completed
+    const completionRate = totalAssigned > 0 ? parseFloat(((totalCompleted / totalAssigned) * 100).toFixed(1)) : 0
+
+    const leaderboard = students
+      .map((s) => {
+        const assigned = Object.values(taskCounts[s.cohort || "jhs"]).reduce((a, b) => a + b, 0)
+        const done = byStudent[s.uid] || 0
+        return {
+          name: s.name,
+          gradeLevel: s.gradeLevel,
+          cohort: s.cohort,
+          tasksAssigned: assigned,
+          tasksCompleted: done,
+          completionRate: assigned > 0 ? parseFloat(((done / assigned) * 100).toFixed(1)) : 0,
+        }
+      })
+      .sort((a, b) => b.completionRate - a.completionRate)
+      .slice(0, 10)
+      .map((s, i) => ({ rank: i + 1, ...s }))
+
+    const taskRows = resources.flatMap((r) =>
+      (r.modules || []).flatMap((m, mi) =>
+        (m.tasks || []).map((t) => {
+          const submitted =
+            subAssign.filter((d) => d.resourceId === r.id && d.moduleIdx === mi && d.taskId === t.id).length +
+            subQuiz.filter((d) => d.resourceId === r.id && d.moduleIdx === mi && d.taskId === t.id).length +
+            subAssess.filter((d) => d.resourceId === r.id && d.moduleIdx === mi && d.taskId === t.id).length
+          return {
+            title: `${r.title}${m.name ? " - " + m.name : ""}${t.title ? " - " + t.title : ""}`,
+            submitted,
+            total: students.length,
+          }
+        })
+      )
+    )
+    taskRows.sort((a, b) => (a.submitted > b.submitted ? -1 : 1))
+
+    return { jhs, shs, completionRate, totalAssigned, totalCompleted, leaderboard, taskRows }
+  }, [resources, students, subAssign, subQuiz, subAssess, moduleProgress])
+
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60000)
     return () => clearInterval(timer)
@@ -359,12 +475,20 @@ export default function Teacher() {
         const docs = await pb.collection("users").getFullList()
         let jhs = 0, shs = 0, total = 0
         const teacherList: { name: string; dept: string; email: string; status: string; level: string }[] = []
+        const studentList: StudentEntry[] = []
         docs.forEach((data) => {
           if (data.role === "student") {
             total++
             const gl = data.gradeLevel || ""
             if (gl.startsWith("Grade") && !gl.startsWith("Senior")) jhs++
             else shs++
+            studentList.push({
+              uid: data.uid || data.id,
+              name: data.name || "",
+              email: data.email || "",
+              gradeLevel: gl,
+              cohort: cohortFromGrade(gl),
+            })
           } else if (data.role === "teacher" && data.uid !== profile?.uid) {
             const dept = data.department || ""
             let level = "Junior High School"
@@ -381,6 +505,7 @@ export default function Teacher() {
         setCohortCounts({ jhs, shs })
         setTotalStudents(total)
         setColleagues(teacherList)
+        setStudents(studentList)
       } catch { /* offline */ }
     }
 
@@ -395,6 +520,35 @@ export default function Teacher() {
 
     return () => { unsubs.forEach((u) => { try { u() } catch { /* ignore */ } }) }
   }, [profile?.uid])
+
+  useEffect(() => {
+    const unsubs: (() => void)[] = []
+
+    const loadAnnouncements = async () => {
+      try {
+        const docs = await pb.collection("announcements").getFullList({ requestKey: null })
+        const byDate: Record<string, { id: string; text: string; category: string }[]> = {}
+        for (const d of docs) {
+          const k = d.date
+          if (!byDate[k]) byDate[k] = []
+          byDate[k].push({ id: d.id, text: d.text, category: d.category || "General" })
+        }
+        setAnnouncements(byDate)
+      } catch { /* offline */ }
+    }
+
+    const subscribe = async () => {
+      try {
+        const u = await pb.collection("announcements").subscribe("*", () => { loadAnnouncements() })
+        unsubs.push(u)
+      } catch { /* realtime unavailable */ }
+    }
+
+    loadAnnouncements()
+    subscribe()
+
+    return () => { unsubs.forEach((u) => { try { u() } catch { /* ignore */ } }) }
+  }, [])
 
   useEffect(() => {
     if (!resourceUploadOpen) return
@@ -1239,12 +1393,13 @@ export default function Teacher() {
                     <h3 className="font-semibold text-gray-800 mb-4">Overall Performance by Cohort</h3>
                     <div className="space-y-3">
                       {[
-                        { label: "Junior High School", pct: 68, color: "bg-blue-500" },
-                        { label: "Senior High School", pct: 82, color: "bg-purple-500" }
+                        { label: "Junior High School", pct: analytics.jhs.rate, color: "bg-blue-500", sub: `${analytics.jhs.completed} / ${analytics.jhs.assigned} tasks` },
+                        { label: "Senior High School", pct: analytics.shs.rate, color: "bg-purple-500", sub: `${analytics.shs.completed} / ${analytics.shs.assigned} tasks` }
                       ].map((c) => (
                         <div key={c.label}>
                           <div className="flex justify-between text-sm mb-1"><span>{c.label}</span><span className="font-medium">{c.pct}%</span></div>
-                          <div className="progress-bar"><div className={`progress-fill ${c.color}`} style={{ width: `${c.pct}%` }} /></div>
+                          <div className="progress-bar"><div className={`progress-fill ${c.color}`} style={{ width: `${Math.min(100, c.pct)}%` }} /></div>
+                          <p className="text-xs text-gray-400 mt-0.5">{c.sub}</p>
                         </div>
                       ))}
                     </div>
@@ -1259,23 +1414,14 @@ export default function Teacher() {
                       <i className="fas fa-trophy text-amber-500 text-sm" /> Class Leaderboard
                     </h3>
                     <div className="space-y-3">
-                      {[
-                        { rank: 1, name: "Maria Santos", cohort: "JHS Section A", score: "92%", color: "bg-yellow-400" },
-                        { rank: 2, name: "Juan Dela Cruz", cohort: "SHS STEM", score: "89%", color: "bg-gray-400" },
-                        { rank: 3, name: "Ana Gomez", cohort: "JHS Section B", score: "76%", color: "bg-amber-700" },
-                        { rank: 4, name: "Carlos Tan", cohort: "JHS Section A", score: "71%", color: "bg-gray-300" },
-                        { rank: 5, name: "Pedro Reyes", cohort: "SHS ABM", score: "62%", color: "bg-gray-300" },
-                        { rank: 6, name: "Liza Santos", cohort: "JHS Section B", score: "55%", color: "bg-gray-300" },
-                        { rank: 7, name: "Kevin Torres", cohort: "SHS STEM", score: "54%", color: "bg-gray-300" },
-                        { rank: 8, name: "Rosa Mendoza", cohort: "JHS Section A", score: "50%", color: "bg-gray-300" },
-                        { rank: 9, name: "Nina Perez", cohort: "SHS HUMSS", score: "48%", color: "bg-gray-300" },
-                        { rank: 10, name: "Jose Lopez", cohort: "SHS ABM", score: "45%", color: "bg-gray-300" }
-                      ].map((s) => (
+                      {analytics.leaderboard.length === 0 ? (
+                        <p className="text-sm text-gray-400 text-center py-6">No student data available</p>
+                      ) : analytics.leaderboard.map((s) => (
                         <div key={s.rank} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition">
-                          <span className={`w-7 h-7 rounded-full ${s.color} flex items-center justify-center text-xs font-bold text-white`}>{s.rank}</span>
-                          <span className="flex-1 text-sm font-medium text-gray-800">{s.name}</span>
-                          <span className="text-xs text-gray-400 mr-2">{s.cohort}</span>
-                          <span className="text-sm font-semibold text-green-600">{s.score}</span>
+                          <span className={`w-7 h-7 rounded-full ${s.rank === 1 ? "bg-yellow-400" : s.rank === 2 ? "bg-gray-400" : s.rank === 3 ? "bg-amber-700" : "bg-gray-300"} flex items-center justify-center text-xs font-bold text-white`}>{s.rank}</span>
+                          <span className="flex-1 text-sm font-medium text-gray-800 truncate">{s.name}</span>
+                          <span className="text-xs text-gray-400 mr-2">{s.gradeLevel || (s.cohort ? s.cohort.toUpperCase() : "—")}</span>
+                          <span className="text-sm font-semibold text-green-600">{s.completionRate}%</span>
                         </div>
                       ))}
                     </div>
@@ -1287,14 +1433,14 @@ export default function Teacher() {
                     <div className="relative w-32 h-32 mx-auto">
                       <svg className="w-32 h-32 -rotate-90" viewBox="0 0 72 72">
                         <circle cx="36" cy="36" r="30" fill="none" stroke="#e2e8f0" strokeWidth="6" />
-                        <circle cx="36" cy="36" r="30" fill="none" stroke="#22c55e" strokeWidth="6" strokeLinecap="round" strokeDasharray="188.5" strokeDashoffset="56.5" />
+                        <circle cx="36" cy="36" r="30" fill="none" stroke="#22c55e" strokeWidth="6" strokeLinecap="round" strokeDasharray="188.5" strokeDashoffset={188.5 * (1 - Math.min(100, analytics.completionRate) / 100)} />
                       </svg>
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-2xl font-bold text-gray-800">70%</span>
+                        <span className="text-2xl font-bold text-gray-800">{analytics.completionRate}%</span>
                         <span className="text-[10px] text-gray-400">Submitted</span>
                       </div>
                     </div>
-                    <p className="text-center text-sm text-gray-500 mt-3">42 out of 60 total assignments completed</p>
+                    <p className="text-center text-sm text-gray-500 mt-3">{analytics.totalCompleted} out of {analytics.totalAssigned} total tasks completed</p>
                   </div>
                   <div className="border-t border-gray-100">
                     <button onClick={() => setCompletionExpanded(!completionExpanded)} className="w-full py-2.5 flex items-center justify-center gap-2 text-sm text-gray-500 hover:text-navy-600 hover:bg-gray-50 transition rounded-b-xl">
@@ -1304,21 +1450,20 @@ export default function Teacher() {
                     {completionExpanded && (
                       <div className="px-6 pb-4 pt-2 border-t border-gray-100">
                         <div className="max-h-64 overflow-y-auto space-y-2">
-                          {assignments.map((a) => {
-                            const completed = a.students.filter(s => s.status !== "missing").length
-                            return (
-                              <div key={a.id} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition">
-                                <div className="flex-1 min-w-0 mr-3">
-                                  <p className="text-sm font-medium text-gray-800 truncate">{a.title}</p>
-                                  <p className="text-xs text-gray-400">{a.cohort}</p>
-                                </div>
-                                <div className="text-right flex-shrink-0">
-                                  <p className="text-sm font-semibold text-green-600">{completed}/{a.students.length}</p>
-                                  <p className="text-xs text-gray-400">completed</p>
-                                </div>
+                          {analytics.taskRows.length === 0 ? (
+                            <p className="text-sm text-gray-400 text-center py-6">No tasks available</p>
+                          ) : analytics.taskRows.map((a, i) => (
+                            <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition">
+                              <div className="flex-1 min-w-0 mr-3">
+                                <p className="text-sm font-medium text-gray-800 truncate">{a.title}</p>
+                                <p className="text-xs text-gray-400">task</p>
                               </div>
-                            )
-                          })}
+                              <div className="text-right flex-shrink-0">
+                                <p className="text-sm font-semibold text-green-600">{a.submitted}/{a.total}</p>
+                                <p className="text-xs text-gray-400">completed</p>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -1360,11 +1505,13 @@ export default function Teacher() {
                       const isToday = day === now.getDate() && calMonth === now.getMonth() && calYear === now.getFullYear()
                       const isSelected = day === calSelected
                       const isPast = calYear < now.getFullYear() || (calYear === now.getFullYear() && calMonth < now.getMonth()) || (calYear === now.getFullYear() && calMonth === now.getMonth() && day < now.getDate())
+                      const hasEvents = (announcements[`${calYear}-${calMonth}-${day}`] || []).length > 0
                       return (
                         <button key={day} onClick={() => !isPast && setCalSelected(day)} disabled={isPast}
-                          className={`flex items-center justify-center rounded-lg text-sm font-medium transition min-h-[48px]
+                          className={`flex items-center justify-center rounded-lg text-sm font-medium transition relative min-h-[48px]
                             ${isPast ? "text-gray-300 cursor-not-allowed" : isSelected ? "bg-navy-500 text-white shadow-md shadow-navy-500/25 z-10" : isToday ? "bg-navy-50 text-navy-700 font-bold ring-2 ring-navy-200" : "hover:bg-gray-50 text-gray-700"}`}>
                           <span>{day}</span>
+                          {hasEvents && <span className={`absolute bottom-1 w-1.5 h-1.5 rounded-full ${isSelected ? "bg-white" : "bg-navy-500"}`} />}
                         </button>
                       )
                     })}
@@ -1376,11 +1523,43 @@ export default function Teacher() {
                       {calSelected ? `${["January","February","March","April","May","June","July","August","September","October","November","December"][calMonth]} ${calSelected}, ${calYear}` : "Select a date"}
                     </h3>
                   </div>
-                  <div className="flex-1 flex flex-col items-center justify-center text-center py-10">
-                    <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                      <i className={`fas ${calSelected ? "fa-calendar-check" : "fa-calendar-plus"} text-gray-300 text-2xl`} />
-                    </div>
-                    <p className="text-sm text-gray-400">{calSelected ? "Date selected" : "Click a date to view"}</p>
+                  <div className="flex-1 overflow-y-auto">
+                    {calSelected ? (
+                      (() => {
+                        const items = announcements[`${calYear}-${calMonth}-${calSelected}`] ?? []
+                        return items.length > 0 ? (
+                          <div className="space-y-3">
+                            {items.map((a) => (
+                              <div key={a.id} className="p-4 rounded-xl border border-amber-200 bg-amber-50 transition hover:shadow-sm">
+                                <div className="flex items-start gap-3">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 mt-1 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide mb-1.5 ${categoryStyles[a.category] || categoryStyles.General}`}>
+                                      {a.category || "General"}
+                                    </span>
+                                    <p className="text-sm text-gray-700">{a.text}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center h-full text-center py-10">
+                            <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                              <i className="fas fa-calendar-day text-gray-300 text-2xl" />
+                            </div>
+                            <p className="text-sm text-gray-400">No announcements</p>
+                          </div>
+                        )
+                      })()
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full text-center py-10">
+                        <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                          <i className="fas fa-calendar-plus text-gray-300 text-2xl" />
+                        </div>
+                        <p className="text-sm text-gray-400">Click a date to view</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

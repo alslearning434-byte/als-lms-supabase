@@ -18,6 +18,8 @@ async function fetchAPI(path: string) {
   return res.json()
 }
 
+type LeaderboardEntry = { rank: number; name: string; email: string; gradeLevel: string; tasksAssigned: number; tasksCompleted: number; completionRate: number }
+
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "th-large" },
   { id: "user-management", label: "User Management", icon: "users-cog" },
@@ -25,6 +27,16 @@ const navItems: NavItem[] = [
   { id: "calendar", label: "Calendar", icon: "calendar-alt" },
   { id: "reports", label: "Reports", icon: "chart-bar" }
 ]
+
+const ANNOUNCEMENT_CATEGORIES = ["General", "Holiday", "Exam", "Event", "Meeting"]
+
+const categoryStyles: Record<string, string> = {
+  General: "bg-gray-100 text-gray-600",
+  Holiday: "bg-green-100 text-green-600",
+  Exam: "bg-red-100 text-red-600",
+  Event: "bg-blue-100 text-blue-600",
+  Meeting: "bg-purple-100 text-purple-600",
+}
 
 export default function Admin() {
   const navigate = useNavigate()
@@ -37,12 +49,14 @@ export default function Admin() {
   const [backupModalOpen, setBackupModalOpen] = useState(false)
   const [backingUp, setBackingUp] = useState(false)
   const [backupSuccess, setBackupSuccess] = useState(false)
+  const [backupError, setBackupError] = useState("")
   const [calYear, setCalYear] = useState(new Date().getFullYear())
   const [calMonth, setCalMonth] = useState(new Date().getMonth())
   const [calSelected, setCalSelected] = useState<number | null>(null)
   const [calModalOpen, setCalModalOpen] = useState(false)
   const [calInput, setCalInput] = useState("")
-  const [announcements, setAnnouncements] = useState<Record<string, string[]>>({})
+  const [calCategory, setCalCategory] = useState("General")
+  const [announcements, setAnnouncements] = useState<Record<string, { id: string; text: string; category: string }[]>>({})
   const [userFilter, setUserFilter] = useState("jhs")
   const [userPage, setUserPage] = useState(1)
   const userPageSize = 10
@@ -69,8 +83,12 @@ export default function Admin() {
     byType: Record<string, { assigned: number; completed: number; rate: number }>
     byCohort: Record<string, { students: number; tasksAssigned: number; tasksCompleted: number; rate: number }>
   } | null>(null)
-  const [jhsLeaderboard, setJhsLeaderboard] = useState<{ rank: number; name: string; email: string; gradeLevel: string; tasksAssigned: number; tasksCompleted: number; completionRate: number }[]>([])
-  const [shsLeaderboard, setShsLeaderboard] = useState<{ rank: number; name: string; email: string; gradeLevel: string; tasksAssigned: number; tasksCompleted: number; completionRate: number }[]>([])
+  const [jhsLeaderboard, setJhsLeaderboard] = useState<LeaderboardEntry[]>([])
+  const [shsLeaderboard, setShsLeaderboard] = useState<LeaderboardEntry[]>([])
+  const [jhsAll, setJhsAll] = useState<LeaderboardEntry[]>([])
+  const [shsAll, setShsAll] = useState<LeaderboardEntry[]>([])
+  const [enrollmentByYear, setEnrollmentByYear] = useState<{ year: string; count: number }[]>([])
+  const [quickStats, setQuickStats] = useState({ assignmentsCompleted: 0, activeTeachers: 0, activeCohorts: 0 })
 
   useEffect(() => {
     const fetchTeachers = async () => {
@@ -119,30 +137,8 @@ export default function Admin() {
   }, [])
 
   useEffect(() => {
-    let cancelled = false
     let unsubPocket: (() => void) | null = null
 
-    const loadBackups = async () => {
-      try {
-        const docs = await pb.collection("backups").getFullList({ sort: "-createdAt" })
-        if (cancelled) return
-        const items = docs.map((d) => ({
-          id: d.id,
-          date: d.date || "",
-          time: d.time || "",
-          type: d.type || "Automatic",
-          size: d.size || "",
-          status: d.status || "Completed",
-          statusColor: d.status === "Completed"
-            ? "bg-green-100 text-green-600"
-            : String(d.status || "").toLowerCase().includes("fail")
-              ? "bg-red-100 text-red-600"
-              : "bg-amber-100 text-amber-600",
-          fileId: d.fileId || "",
-        }))
-        setBackups(items)
-      } catch { /* offline */ }
-    }
     loadBackups()
 
     const subscribe = async () => {
@@ -152,7 +148,22 @@ export default function Admin() {
     }
     subscribe()
 
-    return () => { cancelled = true; unsubPocket?.() }
+    return () => { unsubPocket?.() }
+  }, [])
+
+  useEffect(() => {
+    let unsubPocket: (() => void) | null = null
+
+    loadAnnouncements()
+
+    const subscribe = async () => {
+      try {
+        unsubPocket = await pb.collection("announcements").subscribe("*", () => { loadAnnouncements() })
+      } catch { /* realtime unavailable */ }
+    }
+    subscribe()
+
+    return () => { unsubPocket?.() }
   }, [])
 
   useEffect(() => {
@@ -175,14 +186,39 @@ export default function Admin() {
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        const [overview, jhsLb, shsLb] = await Promise.all([
+        const [overview, jhsLb, shsLb, jhsFull, shsFull, users] = await Promise.all([
           fetchAPI("/api/reports/overview"),
           fetchAPI("/api/reports/leaderboard?cohort=jhs&limit=10"),
           fetchAPI("/api/reports/leaderboard?cohort=shs&limit=10"),
+          fetchAPI("/api/reports/leaderboard?cohort=jhs&limit=500"),
+          fetchAPI("/api/reports/leaderboard?cohort=shs&limit=500"),
+          fetchAPI("/api/users"),
         ])
         setReportsOverview(overview)
         setJhsLeaderboard(jhsLb.students || [])
         setShsLeaderboard(shsLb.students || [])
+        setJhsAll(jhsFull.students || [])
+        setShsAll(shsFull.students || [])
+
+        const students = users.filter((u: any) => u.role === "student" || !u.role)
+        const byYear: Record<string, number> = {}
+        students.forEach((s: any) => {
+          const y = s.joinDate ? String(s.joinDate).match(/\d{4}/)?.[0] : ""
+          byYear[y || "Unknown"] = (byYear[y || "Unknown"] || 0) + 1
+        })
+        setEnrollmentByYear(
+          Object.entries(byYear)
+            .map(([year, count]) => ({ year, count }))
+            .sort((a, b) => b.year.localeCompare(a.year))
+        )
+
+        const teachers = users.filter((u: any) => u.role === "teacher").length
+        const cohorts = new Set(students.map((s: any) => s.gradeLevel).filter(Boolean)).size
+        setQuickStats({
+          assignmentsCompleted: overview.totalTasksCompleted || 0,
+          activeTeachers: teachers,
+          activeCohorts: cohorts,
+        })
       } catch { /* offline */ }
     }
     fetchReports()
@@ -192,70 +228,156 @@ export default function Admin() {
 
   const goTo = (page: string) => setActivePage(page)
 
-  const jhsAllData = [
-    { rank: 1, name: "Juan Dela Cruz", section: "Section A", score: "89%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 2, name: "Ana Gomez", section: "Section B", score: "76%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 3, name: "Carlos Tan", section: "Section C", score: "71%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 4, name: "Maria Flores", section: "Section D", score: "68%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 5, name: "Pedro Reyes", section: "Section E", score: "62%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" },
-    { rank: 6, name: "Ricardo Garcia", section: "Section A", score: "58%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 7, name: "Liza Santos", section: "Section B", score: "55%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 8, name: "Ben Mendoza", section: "Section C", score: "51%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 9, name: "Celia Villanueva", section: "Section D", score: "47%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 10, name: "Dante Aquino", section: "Section E", score: "43%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" },
-    { rank: 11, name: "Elena Santiago", section: "Section A", score: "82%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 12, name: "Fernando Cruz", section: "Section B", score: "78%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 13, name: "Gina Villar", section: "Section C", score: "73%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 14, name: "Hector Santos", section: "Section D", score: "69%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 15, name: "Isabella Ramos", section: "Section E", score: "65%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 16, name: "Joel Bautista", section: "Section A", score: "61%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" },
-    { rank: 17, name: "Karen Lim", section: "Section B", score: "57%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 18, name: "Leo Fernandez", section: "Section C", score: "53%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 19, name: "Mona Dela Torre", section: "Section D", score: "49%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 20, name: "Nestor Aguilar", section: "Section E", score: "44%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" },
-    { rank: 21, name: "Olivia Manalo", section: "Section A", score: "86%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 22, name: "Paolo Ramirez", section: "Section B", score: "80%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 23, name: "Queenie Sison", section: "Section C", score: "75%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 24, name: "Rafael Torres", section: "Section D", score: "70%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 25, name: "Sofia Mercado", section: "Section E", score: "66%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 26, name: "Tomas Rivera", section: "Section A", score: "60%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" },
-    { rank: 27, name: "Ursula David", section: "Section B", score: "56%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 28, name: "Victor Gonzales", section: "Section C", score: "52%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 29, name: "Wanda Pineda", section: "Section D", score: "48%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 30, name: "Xavier Lozano", section: "Section E", score: "41%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" }
-  ]
-  const shsAllData = [
-    { rank: 1, name: "Maria Santos", section: "Section A", score: "92%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 2, name: "Kevin Torres", section: "Section B", score: "85%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 3, name: "Nina Perez", section: "Section C", score: "79%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 4, name: "Jose Lopez", section: "Section D", score: "74%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 5, name: "Rosa Mendoza", section: "Section E", score: "67%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" },
-    { rank: 6, name: "Oscar Ramos", section: "Section A", score: "63%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 7, name: "Paula Martinez", section: "Section B", score: "59%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 8, name: "Quinn Cruz", section: "Section C", score: "54%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 9, name: "Ria Dimagiba", section: "Section D", score: "50%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 10, name: "Sam Jimenez", section: "Section E", score: "46%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" },
-    { rank: 11, name: "Trisha Angeles", section: "Section A", score: "88%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 12, name: "Uriel Salvacion", section: "Section B", score: "83%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 13, name: "Vince Macapagal", section: "Section C", score: "77%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 14, name: "Wendy Corpuz", section: "Section D", score: "72%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 15, name: "Yanni Del Rosario", section: "Section E", score: "68%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 16, name: "Zandro Cabrera", section: "Section A", score: "64%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" },
-    { rank: 17, name: "Angela Pangilinan", section: "Section B", score: "60%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 18, name: "Bong Salazar", section: "Section C", score: "55%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 19, name: "Cathy Lopez", section: "Section D", score: "51%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 20, name: "Dexter Alcantara", section: "Section E", score: "47%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" },
-    { rank: 21, name: "Eva Magtoto", section: "Section A", score: "91%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 22, name: "Freddie Natividad", section: "Section B", score: "84%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 23, name: "Grace Zamora", section: "Section C", score: "78%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 24, name: "Henry Tambong", section: "Section D", score: "73%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 25, name: "Iris Valenzuela", section: "Section E", score: "69%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 26, name: "Jeko Resurreccion", section: "Section A", score: "62%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" },
-    { rank: 27, name: "Kyla Manansala", section: "Section B", score: "58%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 28, name: "Luis Catapang", section: "Section C", score: "53%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 29, name: "Mitch Araneta", section: "Section D", score: "49%", status: "Active", statusColor: "bg-green-100 text-green-600" },
-    { rank: 30, name: "Noel Tengco", section: "Section E", score: "45%", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600" }
-  ]
+  const loadBackups = async () => {
+    try {
+      const docs = await pb.collection("backups").getFullList({ sort: "-createdAt" })
+      const items = docs.map((d) => ({
+        id: d.id,
+        date: d.date || "",
+        time: d.time || "",
+        type: d.type || "Automatic",
+        size: d.size || "",
+        status: d.status || "Completed",
+        statusColor: d.status === "Completed"
+          ? "bg-green-100 text-green-600"
+          : String(d.status || "").toLowerCase().includes("fail")
+            ? "bg-red-100 text-red-600"
+            : "bg-amber-100 text-amber-600",
+        fileId: d.fileId || "",
+      }))
+      setBackups(items)
+    } catch { /* offline */ }
+  }
+
+  const handleRunBackup = async () => {
+    setBackingUp(true)
+    setBackupError("")
+    try {
+      const res = await fetch(`${API_BASE}/api/backups/run`, { method: "POST" })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const record = await res.json()
+      setBackups((prev) => [{
+        id: record.id,
+        date: record.date,
+        time: record.time,
+        type: record.type || "Manual",
+        size: record.size,
+        status: record.status || "Completed",
+        statusColor: "bg-green-100 text-green-600",
+        fileId: record.fileId || "",
+      }, ...prev])
+      setBackupSuccess(true)
+      loadBackups()
+    } catch (err) {
+      setBackupError(err instanceof Error ? err.message : "Backup failed. Please try again.")
+      setBackupSuccess(false)
+    } finally {
+      setBackingUp(false)
+    }
+  }
+
+  const handleDownloadBackup = async (b: { id: string; fileId?: string; date: string }) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/backups/${b.id}/download`)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        alert((err as { error?: string }).error || "Download failed")
+        return
+      }
+      const blob = await res.blob()
+      const disposition = res.headers.get("Content-Disposition") || ""
+      const match = disposition.match(/filename="?([^"]+)"?/)
+      const fileName = match ? match[1] : `backup-${b.date.replace(/[^\w]+/g, "-")}.json.gz`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert("Download failed. Is the server running?")
+    }
+  }
+
+  const handleDeleteBackup = async (b: { id: string; date: string }) => {
+    if (!window.confirm(`Delete backup from ${b.date}? This cannot be undone.`)) return
+    try {
+      const res = await fetch(`${API_BASE}/api/backups/${b.id}`, { method: "DELETE" })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setBackups((prev) => prev.filter((x) => x.id !== b.id))
+    } catch {
+      alert("Failed to delete backup. Is the server running?")
+    }
+  }
+
+  const loadAnnouncements = async () => {
+    try {
+      const docs = await pb.collection("announcements").getFullList({ sort: "-createdAt", requestKey: null })
+      const byDate: Record<string, { id: string; text: string; category: string }[]> = {}
+      for (const d of docs) {
+        const k = d.date
+        if (!byDate[k]) byDate[k] = []
+        byDate[k].push({ id: d.id, text: d.text, category: d.category || "General" })
+      }
+      setAnnouncements(byDate)
+    } catch { /* offline */ }
+  }
+
+  const handleDeleteAnnouncement = async (id: string, key: string) => {
+    try {
+      await pb.collection("announcements").delete(id)
+      setAnnouncements((prev) => ({ ...prev, [key]: (prev[key] ?? []).filter((a) => a.id !== id) }))
+    } catch { /* offline */ }
+  }
+
+  const handleExportReport = async () => {
+    try {
+      const [overview, jhsFull, shsFull] = await Promise.all([
+        fetchAPI("/api/reports/overview"),
+        fetchAPI("/api/reports/leaderboard?cohort=jhs&limit=500"),
+        fetchAPI("/api/reports/leaderboard?cohort=shs&limit=500"),
+      ])
+      const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`
+      const cells = (...vals: (string | number)[]) => vals.map(esc).join(",")
+      const lines: string[] = []
+      lines.push(cells("ALS LMS Report"))
+      lines.push(cells("Generated", new Date().toLocaleString()))
+      lines.push("")
+      lines.push(cells("Total Students", overview.totalStudents))
+      lines.push(cells("Total Tasks Assigned", overview.totalTasksAssigned))
+      lines.push(cells("Total Tasks Completed", overview.totalTasksCompleted))
+      lines.push(cells("Completion Rate (%)", overview.completionRate))
+      lines.push("")
+      lines.push(cells("Tasks by Type", "Assigned", "Completed", "Rate (%)"))
+      Object.keys(overview.byType || {}).forEach((t) => {
+        const b = overview.byType[t]
+        lines.push(cells(t, b.assigned, b.completed, b.rate))
+      })
+      lines.push("")
+      lines.push(cells("JHS Leaderboard"))
+      lines.push(cells("Rank", "Name", "Email", "Grade Level", "Tasks Assigned", "Tasks Completed", "Completion Rate (%)"))
+      ;(jhsFull.students || []).forEach((s: any) => lines.push(cells(s.rank, s.name, s.email, s.gradeLevel, s.tasksAssigned, s.tasksCompleted, s.completionRate)))
+      lines.push("")
+      lines.push(cells("SHS Leaderboard"))
+      lines.push(cells("Rank", "Name", "Email", "Grade Level", "Tasks Assigned", "Tasks Completed", "Completion Rate (%)"))
+      ;(shsFull.students || []).forEach((s: any) => lines.push(cells(s.rank, s.name, s.email, s.gradeLevel, s.tasksAssigned, s.tasksCompleted, s.completionRate)))
+
+      const csv = "\uFEFF" + lines.join("\r\n") + "\r\n"
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `als-lms-report-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert("Export failed. Is the server running?")
+    }
+  }
 
   const allUserRows = (userFilter === "jhs" ? [
     { initials: "JD", name: "Juan Dela Cruz", email: "juan.delacruz@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2026", initialsBg: "bg-amber-100 text-amber-600" },
@@ -747,10 +869,16 @@ export default function Admin() {
                           <td className="px-6 py-4 text-sm text-gray-600">{b.size}</td>
                           <td className="px-6 py-4"><span className={`text-xs font-medium ${b.statusColor} px-2 py-0.5 rounded`}>{b.status}</span></td>
                           <td className="px-6 py-4">
-                            <button onClick={() => alert(`Downloading backup from ${b.date} at ${b.time}...`)}
-                              className="text-navy-500 hover:text-navy-700 text-sm font-medium transition flex items-center gap-1">
-                              <i className="fas fa-download text-xs" /> Download
-                            </button>
+                            <div className="flex items-center gap-3">
+                              <button onClick={() => handleDownloadBackup(b)}
+                                className="text-navy-500 hover:text-navy-700 text-sm font-medium transition flex items-center gap-1">
+                                <i className="fas fa-download text-xs" /> Download
+                              </button>
+                              <button onClick={() => handleDeleteBackup(b)}
+                                className="text-red-500 hover:text-red-700 text-sm font-medium transition flex items-center gap-1">
+                                <i className="fas fa-trash text-xs" /> Delete
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -777,13 +905,7 @@ export default function Admin() {
                             className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition disabled:opacity-50">
                             Cancel
                           </button>
-                          <button onClick={() => {
-                            setBackingUp(true)
-                            setTimeout(() => {
-                              setBackingUp(false)
-                              setBackupSuccess(true)
-                            }, 2000)
-                          }} disabled={backingUp}
+                          <button onClick={handleRunBackup} disabled={backingUp}
                             className="flex-1 py-2.5 rounded-xl bg-navy-500 text-white text-sm font-medium hover:bg-navy-600 transition flex items-center justify-center gap-2 disabled:opacity-70">
                             {backingUp ? (
                               <><i className="fas fa-spinner fa-spin text-sm" /> Backing up...</>
@@ -792,6 +914,9 @@ export default function Admin() {
                             )}
                           </button>
                         </div>
+                        {backupError && (
+                          <p className="text-sm text-red-600 mt-4 text-center"><i className="fas fa-exclamation-circle mr-1" />{backupError}</p>
+                        )}
                       </>
                     ) : (
                       <>
@@ -822,7 +947,7 @@ export default function Admin() {
                   <h2 className="text-2xl font-bold text-gray-800">Reports & Analytics</h2>
                   <p className="text-gray-500 mt-1">View system reports and performance data</p>
                 </div>
-                <button className="px-4 py-2 bg-navy-500 text-white text-sm font-medium rounded-lg hover:bg-navy-600 transition flex items-center gap-2">
+                <button onClick={handleExportReport} className="px-4 py-2 bg-navy-500 text-white text-sm font-medium rounded-lg hover:bg-navy-600 transition flex items-center gap-2">
                   <i className="fas fa-download text-xs" /> Export Report
                 </button>
               </div>
@@ -925,15 +1050,12 @@ export default function Admin() {
                     </button>
                   </h3>
                   <div className="space-y-3">
-                    {[
-                      { label: "This Year", value: "1,284" },
-                      { label: "2025", value: "1,042" },
-                      { label: "2024", value: "856" },
-                      { label: "2023", value: "712" }
-                    ].map((e) => (
-                      <div key={e.label} className="flex justify-between items-center">
-                        <span className="text-sm text-gray-600">{e.label}</span>
-                        <span className="font-bold text-gray-800">{e.value}</span>
+                    {enrollmentByYear.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-4">No enrollment data</p>
+                    ) : enrollmentByYear.map((e) => (
+                      <div key={e.year} className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600">{e.year === String(new Date().getFullYear()) ? "This Year" : e.year}</span>
+                        <span className="font-bold text-gray-800">{e.count.toLocaleString()}</span>
                       </div>
                     ))}
                   </div>
@@ -942,9 +1064,9 @@ export default function Admin() {
                   <h3 className="font-semibold text-gray-800 mb-4">Quick Stats</h3>
                   <div className="space-y-4">
                     {[
-                      { icon: "fa-check-circle", color: "bg-green-100 text-green-600", value: "847", label: "Assignments Completed" },
-                      { icon: "fa-users", color: "bg-blue-100 text-blue-600", value: "142", label: "Active Teachers" },
-                      { icon: "fa-layer-group", color: "bg-amber-100 text-amber-600", value: "24", label: "Active Cohorts" }
+                      { icon: "fa-check-circle", color: "bg-green-100 text-green-600", value: quickStats.assignmentsCompleted.toLocaleString(), label: "Tasks Completed" },
+                      { icon: "fa-users", color: "bg-blue-100 text-blue-600", value: quickStats.activeTeachers.toLocaleString(), label: "Active Teachers" },
+                      { icon: "fa-layer-group", color: "bg-amber-100 text-amber-600", value: quickStats.activeCohorts.toLocaleString(), label: "Active Cohorts" }
                     ].map((s) => (
                       <div key={s.label} className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-lg ${s.color} flex items-center justify-center`}>
@@ -971,21 +1093,22 @@ export default function Admin() {
                       </button>
                     </div>
                     <div className="flex items-end justify-around gap-4 h-56 px-2">
-                      {[
-                        { year: "2023", count: 712, pct: 55, color: "bg-blue-500" },
-                        { year: "2024", count: 856, pct: 67, color: "bg-indigo-500" },
-                        { year: "2025", count: 1042, pct: 81, color: "bg-purple-500" },
-                        { year: "2026", count: 1284, pct: 100, color: "bg-navy-500" }
-                      ].map((e) => (
-                        <div key={e.year} className="flex flex-col items-center gap-2 flex-1">
-                          <span className="text-xs font-semibold text-gray-500">{e.count}</span>
-                          <div className="w-full rounded-lg bg-gray-100 flex items-end justify-center relative" style={{ height: "160px" }}>
-                            <div className={`w-full rounded-lg ${e.color} transition-all duration-700 absolute bottom-0`}
-                              style={{ height: `${e.pct}%` }} />
+                      {(() => {
+                        const max = Math.max(1, ...enrollmentByYear.map((e) => e.count))
+                        const colors = ["bg-blue-500", "bg-indigo-500", "bg-purple-500", "bg-navy-500", "bg-amber-500"]
+                        return enrollmentByYear.length === 0 ? (
+                          <p className="text-sm text-gray-400 text-center py-8 w-full">No enrollment data</p>
+                        ) : enrollmentByYear.map((e, i) => (
+                          <div key={e.year} className="flex flex-col items-center gap-2 flex-1">
+                            <span className="text-xs font-semibold text-gray-500">{e.count}</span>
+                            <div className="w-full rounded-lg bg-gray-100 flex items-end justify-center relative" style={{ height: "160px" }}>
+                              <div className={`w-full rounded-lg ${colors[i % colors.length]} transition-all duration-700 absolute bottom-0`}
+                                style={{ height: `${Math.max(4, (e.count / max) * 100)}%` }} />
+                            </div>
+                            <span className="text-xs font-medium text-gray-700">{e.year === String(new Date().getFullYear()) ? "This Year" : e.year}</span>
                           </div>
-                          <span className="text-xs font-medium text-gray-700">{e.year}</span>
-                        </div>
-                      ))}
+                        ))
+                      })()}
                     </div>
                     <div className="mt-6 text-center text-xs text-gray-400">Total enrollment per year</div>
                   </div>
@@ -995,9 +1118,9 @@ export default function Admin() {
               {/* JHS Leaderboard Modal */}
               {(() => {
                 const perPage = 10
-                const totalJhsPages = Math.ceil(jhsAllData.length / perPage)
+                const totalJhsPages = Math.max(1, Math.ceil(jhsAll.length / perPage))
                 const startJhs = (jhsPage - 1) * perPage
-                const paginatedJhs = jhsAllData.slice(startJhs, startJhs + perPage)
+                const paginatedJhs = jhsAll.slice(startJhs, startJhs + perPage)
                 return jhsModalOpen && (
                   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setJhsModalOpen(false)}>
                     <div className="bg-white rounded-2xl shadow-xl p-7 w-full max-w-3xl mx-4" onClick={(e) => e.stopPropagation()}>
@@ -1011,21 +1134,26 @@ export default function Admin() {
                         <table className="w-full text-left">
                           <thead className="bg-gray-50 border-b border-gray-200">
                             <tr>
-                              {["Rank", "Name", "Section", "Overall Score", "Status"].map((h) => (
+                              {["Rank", "Name", "Grade Level", "Tasks Completed", "Rate"].map((h) => (
                                 <th key={h} className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
                               ))}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
-                            {paginatedJhs.map((s) => (
+                            {paginatedJhs.length === 0 ? (
+                              <tr><td colSpan={5} className="px-5 py-8 text-center text-sm text-gray-400">No student data available</td></tr>
+                            ) : paginatedJhs.map((s) => (
                               <tr key={s.rank} className="hover:bg-gray-50 transition">
                                 <td className="px-5 py-3">
                                   <span className="w-7 h-7 rounded-full bg-navy-500 flex items-center justify-center text-xs font-bold text-white">{s.rank}</span>
                                 </td>
-                                <td className="px-5 py-3 text-sm font-medium text-gray-800">{s.name}</td>
-                                <td className="px-5 py-3 text-sm text-gray-600">{s.section}</td>
-                                <td className="px-5 py-3"><span className="text-sm font-semibold text-green-600">{s.score}</span></td>
-                                <td className="px-5 py-3"><span className={`text-xs font-medium ${s.statusColor} px-2 py-0.5 rounded`}>{s.status}</span></td>
+                                <td className="px-5 py-3">
+                                  <p className="text-sm font-medium text-gray-800">{s.name}</p>
+                                  <p className="text-xs text-gray-400">{s.email}</p>
+                                </td>
+                                <td className="px-5 py-3 text-sm text-gray-600">{s.gradeLevel}</td>
+                                <td className="px-5 py-3 text-sm text-gray-600">{s.tasksCompleted} / {s.tasksAssigned}</td>
+                                <td className="px-5 py-3"><span className="text-sm font-semibold text-green-600">{s.completionRate}%</span></td>
                               </tr>
                             ))}
                           </tbody>
@@ -1057,9 +1185,9 @@ export default function Admin() {
               {/* SHS Leaderboard Modal */}
               {(() => {
                 const perPage = 10
-                const totalShsPages = Math.ceil(shsAllData.length / perPage)
+                const totalShsPages = Math.max(1, Math.ceil(shsAll.length / perPage))
                 const startShs = (shsPage - 1) * perPage
-                const paginatedShs = shsAllData.slice(startShs, startShs + perPage)
+                const paginatedShs = shsAll.slice(startShs, startShs + perPage)
                 return shsModalOpen && (
                   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShsModalOpen(false)}>
                     <div className="bg-white rounded-2xl shadow-xl p-7 w-full max-w-3xl mx-4" onClick={(e) => e.stopPropagation()}>
@@ -1073,21 +1201,26 @@ export default function Admin() {
                         <table className="w-full text-left">
                           <thead className="bg-gray-50 border-b border-gray-200">
                             <tr>
-                              {["Rank", "Name", "Section", "Overall Score", "Status"].map((h) => (
+                              {["Rank", "Name", "Grade Level", "Tasks Completed", "Rate"].map((h) => (
                                 <th key={h} className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
                               ))}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
-                            {paginatedShs.map((s) => (
+                            {paginatedShs.length === 0 ? (
+                              <tr><td colSpan={5} className="px-5 py-8 text-center text-sm text-gray-400">No student data available</td></tr>
+                            ) : paginatedShs.map((s) => (
                               <tr key={s.rank} className="hover:bg-gray-50 transition">
                                 <td className="px-5 py-3">
                                   <span className="w-7 h-7 rounded-full bg-navy-500 flex items-center justify-center text-xs font-bold text-white">{s.rank}</span>
                                 </td>
-                                <td className="px-5 py-3 text-sm font-medium text-gray-800">{s.name}</td>
-                                <td className="px-5 py-3 text-sm text-gray-600">{s.section}</td>
-                                <td className="px-5 py-3"><span className="text-sm font-semibold text-green-600">{s.score}</span></td>
-                                <td className="px-5 py-3"><span className={`text-xs font-medium ${s.statusColor} px-2 py-0.5 rounded`}>{s.status}</span></td>
+                                <td className="px-5 py-3">
+                                  <p className="text-sm font-medium text-gray-800">{s.name}</p>
+                                  <p className="text-xs text-gray-400">{s.email}</p>
+                                </td>
+                                <td className="px-5 py-3 text-sm text-gray-600">{s.gradeLevel}</td>
+                                <td className="px-5 py-3 text-sm text-gray-600">{s.tasksCompleted} / {s.tasksAssigned}</td>
+                                <td className="px-5 py-3"><span className="text-sm font-semibold text-green-600">{s.completionRate}%</span></td>
                               </tr>
                             ))}
                           </tbody>
@@ -1181,13 +1314,20 @@ export default function Admin() {
                         const items = announcements[key] ?? []
                         return items.length > 0 ? (
                           <div className="space-y-3">
-                            {items.map((a, i) => (
-                              <div key={i} className="p-4 rounded-xl border border-amber-200 bg-amber-50 transition hover:shadow-sm">
+                            {items.map((a) => (
+                              <div key={a.id} className="p-4 rounded-xl border border-amber-200 bg-amber-50 transition hover:shadow-sm">
                                 <div className="flex items-start gap-3">
                                   <span className="w-2.5 h-2.5 rounded-full bg-amber-500 mt-1 flex-shrink-0" />
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-gray-700">{a}</p>
+                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide mb-1.5 ${categoryStyles[a.category] || categoryStyles.General}`}>
+                                      {a.category || "General"}
+                                    </span>
+                                    <p className="text-sm text-gray-700">{a.text}</p>
                                   </div>
+                                  <button onClick={() => handleDeleteAnnouncement(a.id, key)}
+                                    className="text-gray-300 hover:text-red-500 transition flex-shrink-0" title="Delete announcement">
+                                    <i className="fas fa-trash-alt text-sm" />
+                                  </button>
                                 </div>
                               </div>
                             ))}
@@ -1215,7 +1355,7 @@ export default function Admin() {
 
               {/* Add Announcement Modal */}
               {calModalOpen && calSelected && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setCalModalOpen(false); setCalInput("") }}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setCalModalOpen(false); setCalInput(""); setCalCategory("General") }}>
                   <div className="bg-white rounded-2xl shadow-xl p-7 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
                     <div className="text-center mb-5">
                       <div className="w-16 h-16 rounded-full bg-navy-100 flex items-center justify-center mx-auto mb-4">
@@ -1224,18 +1364,31 @@ export default function Admin() {
                       <h3 className="text-lg font-bold text-gray-800">Add Announcement</h3>
                       <p className="text-sm text-gray-500 mt-1">{["January","February","March","April","May","June","July","August","September","October","November","December"][calMonth]} {calSelected}, {calYear}</p>
                     </div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Category</label>
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {ANNOUNCEMENT_CATEGORIES.map((c) => (
+                        <button key={c} type="button" onClick={() => setCalCategory(c)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${calCategory === c ? "bg-navy-500 text-white border-navy-500" : "bg-white text-gray-600 border-gray-200 hover:border-navy-300"}`}>
+                          {c}
+                        </button>
+                      ))}
+                    </div>
                     <textarea value={calInput} onChange={(e) => setCalInput(e.target.value)} rows={3} placeholder="Type your announcement here..."
                       className="w-full p-3 rounded-xl border border-gray-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-navy-500/20 focus:border-navy-500" />
                     <div className="flex gap-3 mt-4">
-                      <button onClick={() => { setCalModalOpen(false); setCalInput("") }}
+                      <button onClick={() => { setCalModalOpen(false); setCalInput(""); setCalCategory("General") }}
                         className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
                         Cancel
                       </button>
-                      <button onClick={() => {
+                      <button onClick={async () => {
                         if (!calInput.trim()) return
                         const key = `${calYear}-${calMonth}-${calSelected}`
-                        setAnnouncements(prev => ({ ...prev, [key]: [...(prev[key] ?? []), calInput.trim()] }))
+                        try {
+                          const rec = await pb.collection("announcements").create({ date: key, text: calInput.trim(), category: calCategory })
+                          setAnnouncements(prev => ({ ...prev, [key]: [...(prev[key] ?? []), { id: rec.id, text: rec.text, category: rec.category || calCategory }] }))
+                        } catch { /* offline */ }
                         setCalInput("")
+                        setCalCategory("General")
                         setCalModalOpen(false)
                       }} disabled={!calInput.trim()}
                         className="flex-1 py-2.5 rounded-xl bg-navy-500 text-white text-sm font-medium hover:bg-navy-600 transition disabled:opacity-50">

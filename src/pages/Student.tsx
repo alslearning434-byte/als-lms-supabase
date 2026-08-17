@@ -3047,6 +3047,7 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
   const [year, setYear] = useState(today.getFullYear())
   const [month, setMonth] = useState(today.getMonth())
   const [selected, setSelected] = useState<number | null>(today.getDate())
+  const [announcements, setAnnouncements] = useState<Record<string, { id: string; text: string; category: string }[]>>({})
 
   const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"]
   const dayNames = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]
@@ -3067,7 +3068,16 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
     assignment: { bg: "bg-red-50 border-red-200", dot: "bg-red-500", label: t("Assignment") },
     meeting: { bg: "bg-blue-50 border-blue-200", dot: "bg-blue-500", label: t("Meeting") },
     event: { bg: "bg-purple-50 border-purple-200", dot: "bg-purple-500", label: t("Event") },
-    milestone: { bg: "bg-amber-50 border-amber-200", dot: "bg-amber-500", label: t("Milestone") }
+    milestone: { bg: "bg-amber-50 border-amber-200", dot: "bg-amber-500", label: t("Milestone") },
+    announcement: { bg: "bg-amber-50 border-amber-200", dot: "bg-amber-500", label: t("Announcement") }
+  }
+
+  const categoryStyles: Record<string, string> = {
+    General: "bg-gray-100 text-gray-600",
+    Holiday: "bg-green-100 text-green-600",
+    Exam: "bg-red-100 text-red-600",
+    Event: "bg-blue-100 text-blue-600",
+    Meeting: "bg-purple-100 text-purple-600",
   }
 
   const prev = () => { if (month === 0) { setMonth(11); setYear(y => y - 1) } else { setMonth(m => m - 1) }; setSelected(null) }
@@ -3078,8 +3088,41 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
     return () => clearInterval(timer)
   }, [])
 
+  useEffect(() => {
+    const unsubs: (() => void)[] = []
+
+    const loadAnnouncements = async () => {
+      try {
+        const docs = await pb.collection("announcements").getFullList({ requestKey: null })
+        const byDate: Record<string, { id: string; text: string; category: string }[]> = {}
+        for (const d of docs) {
+          const k = d.date
+          if (!byDate[k]) byDate[k] = []
+          byDate[k].push({ id: d.id, text: d.text, category: d.category || "General" })
+        }
+        setAnnouncements(byDate)
+      } catch { /* offline */ }
+    }
+
+    const subscribe = async () => {
+      try {
+        const u = await pb.collection("announcements").subscribe("*", () => { loadAnnouncements() })
+        unsubs.push(u)
+      } catch { /* realtime unavailable */ }
+    }
+
+    loadAnnouncements()
+    subscribe()
+
+    return () => { unsubs.forEach((u) => { try { u() } catch { /* ignore */ } }) }
+  }, [])
+
   const selectedKey = selected?.toString() ?? ""
-  const selectedEvents = events[selectedKey] ?? []
+  const selectedAnnouncements = selected ? (announcements[`${year}-${month}-${selected}`] ?? []) : []
+  const selectedEvents: { title: string; type: string; time?: string; category?: string }[] = [
+    ...(events[selectedKey] ?? []),
+    ...selectedAnnouncements.map((a) => ({ title: a.text, type: "announcement", time: undefined, category: a.category }))
+  ]
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
@@ -3108,12 +3151,13 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
             const isToday = day === today.getDate() && month === today.getMonth() && year === today.getFullYear()
             const isSelected = day === selected
             const isPast = year < today.getFullYear() || (year === today.getFullYear() && month < today.getMonth()) || (year === today.getFullYear() && month === today.getMonth() && day < today.getDate())
+            const hasEvents = (events[String(day)]?.length ?? 0) > 0 || (announcements[`${year}-${month}-${day}`]?.length ?? 0) > 0
             return (
               <button key={day} onClick={() => !isPast && setSelected(day)} disabled={isPast}
                 className={`flex flex-col items-center justify-center rounded-lg text-sm font-medium transition relative min-h-[48px]
                   ${isPast ? "text-gray-300 cursor-not-allowed" : isSelected ? "bg-navy-500 text-white shadow-md shadow-navy-500/25 z-10" : isToday ? "bg-navy-50 text-navy-700 font-bold ring-2 ring-navy-200" : "hover:bg-gray-50 text-gray-700"}`}>
                 <span>{day}</span>
-
+                {hasEvents && <span className={`absolute bottom-1 w-1.5 h-1.5 rounded-full ${isSelected ? "bg-white" : "bg-navy-500"}`} />}
               </button>
             )
           })}
@@ -3141,9 +3185,13 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
                         <p className="text-sm font-semibold text-gray-800">{e.title}</p>
                         <div className="flex items-center gap-2 mt-1.5">
                           {e.time && <span className="text-xs text-gray-400"><i className="far fa-clock mr-1" />{e.time}</span>}
-                          <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${style.dot.replace("bg-", "bg-").replace("500", "100")} ${style.dot.replace("bg-", "text-").replace("500", "600")}`}>
-                            {style.label}
-                          </span>
+                          {e.type === "announcement" && e.category ? (
+                            <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded ${categoryStyles[e.category] || categoryStyles.General}`}>{e.category}</span>
+                          ) : (
+                            <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${style.dot.replace("bg-", "bg-").replace("500", "100")} ${style.dot.replace("bg-", "text-").replace("500", "600")}`}>
+                              {style.label}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>

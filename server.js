@@ -4,7 +4,7 @@ import express from "express"
 import multer from "multer"
 import cors from "cors"
 import os from "os"
-import { readdirSync, statSync } from "fs"
+import { readdirSync, statSync, createWriteStream } from "fs"
 import { mkdir, readFile, readdir, unlink, writeFile, rm } from "fs/promises"
 import { fileURLToPath } from "url"
 import { dirname, join, extname, basename } from "path"
@@ -134,7 +134,7 @@ async function runBackup(type = "Manual") {
     const fileName = `${backupId}.json.gz`
     const filePath = join(BACKUP_DIR, fileName)
     const artifactJson = JSON.stringify(artifact)
-    await pipeline(Readable.from([artifactJson]), createGzip(), writeFile(filePath))
+    await pipeline(Readable.from([artifactJson]), createGzip(), createWriteStream(filePath))
 
     const artifactBytes = await statSync(filePath).size
     const record = {
