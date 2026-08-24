@@ -200,6 +200,84 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
     })
   }, [])
 
+  const transformPastedHTML = useCallback((html: string): string => {
+    if (!/<table[\s>]/i.test(html)) return html
+    const doc = new DOMParser().parseFromString(html, "text/html")
+    const table = doc.querySelector("table")
+    if (!table) return html
+
+    const cleanCellContent = (cell: Element): string => {
+      const tmp = document.createElement("div")
+      Array.from(cell.childNodes).forEach((node) => tmp.appendChild(node.cloneNode(true)))
+      let html = tmp.innerHTML
+      html = html.replace(/<o:p>[\s\S]*?<\/o:p>/gi, "")
+      html = html.replace(/<\/?o:p[^>]*>/gi, "")
+      html = html.replace(/<m:o[^>]*>[\s\S]*?<\/m:o[^>]*>/gi, "")
+      html = html.replace(/<\/?m:[^>]*>/gi, "")
+      html = html.replace(/<w:sdt[^>]*>[\s\S]*?<\/w:sdt>/gi, "")
+      html = html.replace(/<\/?w:[^>]*>/gi, "")
+      html = html.replace(/<font[^>]*>/gi, "")
+      html = html.replace(/<\/font>/gi, "")
+      html = html.replace(/<span\s*style="[^"]*mso-[^"]*"[^>]*>/gi, "")
+      html = html.replace(/<span\s+class="[^"]*"/gi, "<span")
+      html = html.replace(/&nbsp;/g, " ")
+      html = html.replace(/<p[^>]*>\s*<\/p>/gi, "")
+      html = html.replace(/<div[^>]*>\s*<\/div>/gi, "")
+      html = html.replace(/<br\s*\/?>\s*<br\s*\/?>/g, "<br>")
+      const inner = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html").body
+        .querySelector("div")
+      if (!inner) return "<p><br></p>"
+      Array.from(inner.querySelectorAll("p > p")).forEach((p) => {
+        p.parentNode!.insertBefore(document.createTextNode("\n"), p)
+        while (p.firstChild) p.parentNode!.insertBefore(p.firstChild, p)
+        p.remove()
+      })
+      Array.from(inner.querySelectorAll("p")).forEach((p) => {
+        while (p.firstChild) p.parentNode!.insertBefore(p.firstChild, p)
+        p.remove()
+      })
+      inner.querySelectorAll("br + br, br:only-child").forEach((br) => {
+        const prev = br.previousSibling
+        if (!prev || (prev.nodeType === Node.TEXT_NODE && !prev.textContent?.trim())) br.remove()
+      })
+      let result = inner.innerHTML.trim()
+      result = result.replace(/<br\s*\/?>$/gi, "")
+      if (!result.trim() || result === "<br>" || result === "<br/>" || result === "<br />") return "<p><br></p>"
+      if (!result.startsWith("<p>")) result = `<p>${result}</p>`
+      return result
+    }
+
+    const cleanTable = (tbl: Element): string => {
+      const allRows = tbl.querySelectorAll("tr")
+      if (allRows.length === 0) return ""
+
+      const hasThead = tbl.querySelector(":scope > thead") !== null
+      let out = "<table>"
+      allRows.forEach((tr, rowIdx) => {
+        out += "<tr>"
+        tr.querySelectorAll(":scope > th, :scope > td").forEach((cell) => {
+          const isTh = cell.tagName.toLowerCase() === "th" || (hasThead && rowIdx === 0 && cell.closest("thead") !== null)
+          const tag = isTh ? "th" : "td"
+          const colspan = parseInt(cell.getAttribute("colspan") || "1", 10)
+          const rowspan = parseInt(cell.getAttribute("rowspan") || "1", 10)
+          const attrs: string[] = []
+          if (colspan > 1) attrs.push(`colspan="${colspan}"`)
+          if (rowspan > 1) attrs.push(`rowspan="${rowspan}"`)
+          const content = cleanCellContent(cell)
+          out += `<${tag}${attrs.length ? " " + attrs.join(" ") : ""}>${content}</${tag}>`
+        })
+        out += "</tr>"
+      })
+      out += "</table>"
+      return out
+    }
+
+    const tables = doc.querySelectorAll("table")
+    let result = ""
+    tables.forEach((tbl) => { result += cleanTable(tbl) })
+    return result || html
+  }, [])
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -228,6 +306,7 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
           isDark ? "text-gray-100" : "text-gray-800"
         }`,
       },
+      transformPastedHTML,
       handlePaste: (view, event) => {
         const items = event.clipboardData?.items
         if (!items) return false
@@ -602,10 +681,11 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
         .tiptap ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
         .tiptap blockquote { border-left: 3px solid #d1d5db; padding-left: 0.75rem; margin: 0.5rem 0; color: #6b7280; font-style: italic; }
         .tiptap a { color: #2563eb; text-decoration: underline; }
-        .tiptap table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; table-layout: auto; }
-        .tiptap td, .tiptap th { border: 1px solid #d1d5db; padding: 0.125rem 0.25rem; position: relative; line-height: 1.4; }
+        .tiptap table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; table-layout: auto; overflow: hidden; border-radius: 0.5rem; border: 1px solid #d1d5db; }
+        .tiptap td, .tiptap th { border: 1px solid #d1d5db; padding: 0.375rem 0.5rem; position: relative; line-height: 1.5; vertical-align: top; }
         .tiptap td p, .tiptap th p { margin: 0; }
-        .tiptap th { background: #f3f4f6; font-weight: 600; }
+        .tiptap th { background: #1e3a5f; color: #ffffff; font-weight: 600; text-align: left; }
+        .tiptap td:first-child { font-weight: 500; }
         .tiptap img { max-width: 100%; height: auto; border-radius: 0.5rem; margin: 0.5rem 0; cursor: pointer; display: block; }
         .tiptap img.ProseMirror-selectednode { outline: 2px solid #3b82f6; outline-offset: 2px; }
         .tiptap .image-resize-wrapper { position: relative; display: inline-block; line-height: 0; }
@@ -626,7 +706,8 @@ export default function TiptapEditor({ content, onChange, placeholder = "Write h
         .tiptap-dark .tiptap blockquote { color: #9ca3af; border-color: #4b5563; }
         .tiptap-dark .tiptap a { color: #60a5fa; }
         .tiptap-dark .tiptap td, .tiptap-dark .tiptap th { border-color: #4b5563; }
-        .tiptap-dark .tiptap th { background: #374151; }
+        .tiptap-dark .tiptap th { background: #1e3a5f; color: #f3f4f6; }
+        .tiptap-dark .tiptap table { border-color: #4b5563; }
         .tiptap-dark .tiptap .selectedCell::after { background: rgba(96, 165, 250, 0.15); }
         .tiptap-dark .tiptap p.is-editor-empty:first-child::before { color: #4b5563; }
       `}</style>
