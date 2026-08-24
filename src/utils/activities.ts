@@ -1,4 +1,4 @@
-import { createActivity } from "../pocketbase"
+import { createActivity } from "../supabase"
 
 export interface ActivityRecord {
   id?: string

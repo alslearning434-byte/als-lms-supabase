@@ -1,6 +1,6 @@
 import { useState } from "react"
 import type { ModuleAssessment, AssessmentQuestion } from "../types"
-import { pb } from "../pocketbase"
+import { supabase } from "../supabase"
 
 interface Props {
   resourceId: string
@@ -62,27 +62,27 @@ export default function AssessmentTaker({ resourceId, assessmentId, assessment, 
     setScore({ score: sc, total: results.length, results })
     setSubmitted(true)
     const submittedAt = new Date().toISOString()
-    pb.collection("assessmentSubmissions").create({
-      assessmentId,
-      resourceId,
-      studentId,
-      studentName,
+    supabase.from("assessment_submissions").insert({
+      assessment_id: assessmentId,
+      resource_id: resourceId,
+      student_id: studentId,
+      student_name: studentName,
       score: sc,
-      totalPoints: results.length,
+      total_points: results.length,
       answers,
-      submittedAt,
+      submitted_at: submittedAt,
     }).catch(() => {})
     if (context === "quiz" && moduleIdx !== undefined) {
-      pb.collection("quizSubmissions").create({
-        resourceId,
-        moduleIdx,
-        studentId,
-        studentName,
+      supabase.from("quiz_submissions").insert({
+        resource_id: resourceId,
+        module_idx: moduleIdx,
+        student_id: studentId,
+        student_name: studentName,
         score: sc,
         total: results.length,
         passed,
         answers,
-        submittedAt,
+        submitted_at: submittedAt,
       }).catch(() => {})
     }
     onComplete?.({ score: sc, total: results.length, passed })

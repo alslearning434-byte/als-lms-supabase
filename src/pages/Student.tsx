@@ -8,7 +8,7 @@ import ChangePasswordModal from "../components/ChangePasswordModal"
 import AssessmentTaker from "../components/AssessmentTaker"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
-import { pb, upsertModuleProgress } from "../pocketbase"
+import { supabase, upsertModuleProgress } from "../supabase"
 import type { NavItem, Resource, ModuleTask } from "../types"
 import { getSubjectIcon } from "../utils/subjectIcons"
 import ImageCarousel from "../components/ImageCarousel"
@@ -275,7 +275,8 @@ export default function Student() {
 
     const loadResources = async () => {
       try {
-        const items = await pb.collection("resources").getFullList()
+        const { data } = await supabase.from("resources").select("*")
+        const items = data ?? []
         const fetched: Resource[] = items.map((d) => ({
           id: d.id,
           subject: d.subject || "",
@@ -283,8 +284,8 @@ export default function Student() {
           description: d.description || "",
           modules: d.modules || [],
           assessment: d.assessment || undefined,
-          uploadedBy: d.uploadedBy || "",
-          uploadedAt: d.uploadedAt || "",
+          uploadedBy: d.uploaded_by || "",
+          uploadedAt: d.uploaded_at || "",
         }))
         setResources(fetched)
       } catch { /* offline */ }
@@ -293,11 +294,12 @@ export default function Student() {
     const loadMyProgress = async () => {
       if (!uid) return
       try {
-        const items = await pb.collection("moduleProgress").getFullList()
+        const { data } = await supabase.from("module_progress").select("*")
+        const items = data ?? []
         const pMap: Record<string, number[]> = {}
         items.forEach((d) => {
-          if (d.userId !== uid) return
-          pMap[d.resourceId] = d.viewedModules || []
+          if (d.user_id !== uid) return
+          pMap[d.resource_id] = d.viewed_modules || []
         })
         setProgressMap(pMap)
       } catch { /* offline */ }
@@ -306,11 +308,12 @@ export default function Student() {
     const loadMyAssessmentSubs = async () => {
       if (!uid) return
       try {
-        const items = await pb.collection("assessmentSubmissions").getFullList()
+        const { data } = await supabase.from("assessment_submissions").select("*")
+        const items = data ?? []
         const subs: Record<string, { score: number; totalPoints: number }> = {}
         items.forEach((d) => {
-          if (d.studentId !== uid) return
-          subs[d.resourceId] = { score: d.score, totalPoints: d.totalPoints }
+          if (d.student_id !== uid) return
+          subs[d.resource_id] = { score: d.score, totalPoints: d.total_points }
         })
         setAssessmentSubmissions(subs)
       } catch { /* offline */ }
@@ -319,11 +322,12 @@ export default function Student() {
     const loadMyQuizSubs = async () => {
       if (!uid) return
       try {
-        const items = await pb.collection("quizSubmissions").getFullList()
+        const { data } = await supabase.from("quiz_submissions").select("*")
+        const items = data ?? []
         const qsubs: Record<string, { score: number; total: number; passed: boolean }> = {}
         items.forEach((d) => {
-          if (d.studentId !== uid) return
-          const key = `${d.resourceId}_${d.moduleIdx}`
+          if (d.student_id !== uid) return
+          const key = `${d.resource_id}_${d.module_idx}`
           if (!qsubs[key] || d.passed) {
             qsubs[key] = { score: d.score, total: d.total, passed: d.passed }
           }
@@ -335,12 +339,13 @@ export default function Student() {
     const loadMyAssignmentSubs = async () => {
       if (!uid) return
       try {
-        const items = await pb.collection("assignmentSubmissions").getFullList()
+        const { data } = await supabase.from("assignment_submissions").select("*")
+        const items = data ?? []
         const asubs: Record<string, { fileName: string; note: string; submittedAt: string }> = {}
         items.forEach((d) => {
-          if (d.studentId !== uid) return
-          const key = `${d.resourceId}_${d.moduleIdx}_${d.taskId}`
-          asubs[key] = { fileName: d.fileName || "", note: d.note || "", submittedAt: d.submittedAt || "" }
+          if (d.student_id !== uid) return
+          const key = `${d.resource_id}_${d.module_idx}_${d.task_id}`
+          asubs[key] = { fileName: d.file_name || "", note: d.note || "", submittedAt: d.submitted_at || "" }
         })
         setAssignmentSubs(asubs)
       } catch { /* offline */ }
@@ -352,15 +357,19 @@ export default function Student() {
     loadMyQuizSubs()
     loadMyAssignmentSubs()
 
-    const subscribeAll = async () => {
-      try {
-        const u1 = await pb.collection("resources").subscribe("*", () => { loadResources() })
-        const u2 = await pb.collection("moduleProgress").subscribe("*", () => { loadMyProgress() })
-        const u3 = await pb.collection("assessmentSubmissions").subscribe("*", () => { loadMyAssessmentSubs() })
-        const u4 = await pb.collection("quizSubmissions").subscribe("*", () => { loadMyQuizSubs() })
-        const u5 = await pb.collection("assignmentSubmissions").subscribe("*", () => { loadMyAssignmentSubs() })
-        unsubs.push(u1, u2, u3, u4, u5)
-      } catch { /* realtime unavailable */ }
+    const subscribeAll = () => {
+      const c1 = supabase.channel("student-resources-changes").on("postgres_changes", { event: "*", schema: "public", table: "resources" }, () => { loadResources() }).subscribe()
+      const c2 = supabase.channel("student-module-progress-changes").on("postgres_changes", { event: "*", schema: "public", table: "module_progress" }, () => { loadMyProgress() }).subscribe()
+      const c3 = supabase.channel("student-assessment-submissions-changes").on("postgres_changes", { event: "*", schema: "public", table: "assessment_submissions" }, () => { loadMyAssessmentSubs() }).subscribe()
+      const c4 = supabase.channel("student-quiz-submissions-changes").on("postgres_changes", { event: "*", schema: "public", table: "quiz_submissions" }, () => { loadMyQuizSubs() }).subscribe()
+      const c5 = supabase.channel("student-assignment-submissions-changes").on("postgres_changes", { event: "*", schema: "public", table: "assignment_submissions" }, () => { loadMyAssignmentSubs() }).subscribe()
+      unsubs.push(
+        () => { supabase.removeChannel(c1) },
+        () => { supabase.removeChannel(c2) },
+        () => { supabase.removeChannel(c3) },
+        () => { supabase.removeChannel(c4) },
+        () => { supabase.removeChannel(c5) }
+      )
     }
     subscribeAll()
 
@@ -471,11 +480,12 @@ export default function Student() {
 
     const loadStudents = async () => {
       try {
-        const items = await pb.collection("users").getFullList()
+        const { data } = await supabase.from("profiles").select("*")
+        const items = data ?? []
         const studentMap: Record<string, { displayName: string; gradeLevel: string }> = {}
         items.forEach((d) => {
           if (d.role !== "student") return
-          studentMap[d.uid] = { displayName: d.name || "Unknown", gradeLevel: d.gradeLevel || "Section A" }
+          studentMap[d.uid || d.id] = { displayName: d.name || "Unknown", gradeLevel: d.grade_level || "Section A" }
         })
         setLbStudents(studentMap)
       } catch { /* offline */ }
@@ -483,11 +493,12 @@ export default function Student() {
 
     const loadModuleCounts = async () => {
       try {
-        const items = await pb.collection("moduleProgress").getFullList()
+        const { data } = await supabase.from("module_progress").select("*")
+        const items = data ?? []
         const moduleCounts: Record<string, number> = {}
         items.forEach((d) => {
-          const docUid = d.userId
-          if (docUid) moduleCounts[docUid] = (moduleCounts[docUid] || 0) + (d.viewedModules?.length || 0)
+          const docUid = d.user_id
+          if (docUid) moduleCounts[docUid] = (moduleCounts[docUid] || 0) + (d.viewed_modules?.length || 0)
         })
         setLbModuleCounts(moduleCounts)
       } catch { /* offline */ }
@@ -495,10 +506,11 @@ export default function Student() {
 
     const loadQuizStats = async () => {
       try {
-        const items = await pb.collection("quizSubmissions").getFullList()
+        const { data } = await supabase.from("quiz_submissions").select("*")
+        const items = data ?? []
         const quizStats: Record<string, { total: number; count: number }> = {}
         items.forEach((d) => {
-          const docUid = d.studentId
+          const docUid = d.student_id
           if (docUid) {
             if (!quizStats[docUid]) quizStats[docUid] = { total: 0, count: 0 }
             quizStats[docUid].total += (d.score / d.total) * 100
@@ -513,13 +525,15 @@ export default function Student() {
     loadModuleCounts()
     loadQuizStats()
 
-    const subscribeLeaderboard = async () => {
-      try {
-        const u1 = await pb.collection("users").subscribe("*", () => { loadStudents() })
-        const u2 = await pb.collection("moduleProgress").subscribe("*", () => { loadModuleCounts() })
-        const u3 = await pb.collection("quizSubmissions").subscribe("*", () => { loadQuizStats() })
-        unsubs.push(u1, u2, u3)
-      } catch { /* realtime unavailable */ }
+    const subscribeLeaderboard = () => {
+      const c1 = supabase.channel("student-profiles-changes").on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => { loadStudents() }).subscribe()
+      const c2 = supabase.channel("student-leaderboard-module-progress-changes").on("postgres_changes", { event: "*", schema: "public", table: "module_progress" }, () => { loadModuleCounts() }).subscribe()
+      const c3 = supabase.channel("student-leaderboard-quiz-submissions-changes").on("postgres_changes", { event: "*", schema: "public", table: "quiz_submissions" }, () => { loadQuizStats() }).subscribe()
+      unsubs.push(
+        () => { supabase.removeChannel(c1) },
+        () => { supabase.removeChannel(c2) },
+        () => { supabase.removeChannel(c3) }
+      )
     }
     subscribeLeaderboard()
 
@@ -2345,21 +2359,23 @@ export default function Student() {
                         if (!taskFile) return
                         try {
                           const sid = user?.uid || ""
-                          const existing = await pb.collection("assignmentSubmissions").getFirstListItem(
-                            pb.filter("studentId = {:sid} && resourceId = {:rid} && taskId = {:tid}", { sid, rid: r.id, tid: task.id }),
-                            { requestKey: null }
-                          ).catch(() => null)
+                          const { data: existing } = await supabase.from("assignment_submissions")
+                            .select("*")
+                            .eq("student_id", sid)
+                            .eq("resource_id", r.id)
+                            .eq("task_id", task.id)
+                            .maybeSingle()
                           const payload = {
-                            studentId: sid,
-                            resourceId: r.id,
-                            moduleIdx,
-                            taskId: task.id,
-                            fileName: taskFile.name,
+                            student_id: sid,
+                            resource_id: r.id,
+                            module_idx: moduleIdx,
+                            task_id: task.id,
+                            file_name: taskFile.name,
                             note: taskNote,
-                            submittedAt: new Date().toISOString(),
+                            submitted_at: new Date().toISOString(),
                           }
-                          if (existing) await pb.collection("assignmentSubmissions").update(existing.id, payload)
-                          else await pb.collection("assignmentSubmissions").create(payload)
+                          if (existing) await supabase.from("assignment_submissions").update(payload).eq("id", existing.id).select().single()
+                          else await supabase.from("assignment_submissions").insert(payload).select().single()
                           setAssignmentSubs(prev => ({ ...prev, [subKey]: { fileName: taskFile.name, note: taskNote, submittedAt: new Date().toISOString() } }))
                           setTaskFile(null)
                           setTaskNote("")
@@ -2904,6 +2920,8 @@ function ModuleViewer({ data, viewedModules, onBack, onNavigate, onMarkViewed, o
         .tiptap-preview blockquote { border-left: 3px solid #d1d5db; padding-left: 0.75rem; color: #6b7280; font-style: italic; }
         .tiptap-preview a { color: #2563eb; text-decoration: underline; }
         .tiptap-preview p { margin: 0.25rem 0; }
+        @keyframes dotPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(59,77,130,0.4); } 50% { box-shadow: 0 0 0 4px rgba(59,77,130,0); } }
+        .cal-dot-pulse { animation: dotPulse 2s ease-in-out infinite; }
       `}</style>
 
       {/* Congratulations Popup */}
@@ -3055,14 +3073,7 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
   const firstDay = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
 
-  const events: Record<string, { title: string; type: string; time?: string }[]> = {
-    "15": [{ title: "Math Quiz", type: "assignment", time: "11:59 PM" }, { title: "Study Group", type: "meeting", time: "2:00 PM" }],
-    "20": [{ title: "Module 4 Progress Check", type: "milestone" }],
-    "22": [{ title: "Communication Skills Quiz 3", type: "assignment", time: "11:59 PM" }],
-    "25": [{ title: "Scientific Literacy Portfolio", type: "assignment", time: "11:59 PM" }],
-
-    "28": [{ title: "Math Module 2 Assessment", type: "assignment", time: "11:59 PM" }]
-  }
+  const events: Record<string, { title: string; type: string; time?: string }[]> = {}
 
   const typeStyles: Record<string, { bg: string; dot: string; label: string }> = {
     assignment: { bg: "bg-red-50 border-red-200", dot: "bg-red-500", label: t("Assignment") },
@@ -3079,6 +3090,13 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
     Event: "bg-blue-100 text-blue-600",
     Meeting: "bg-purple-100 text-purple-600",
   }
+  const categoryDotColors: Record<string, string> = {
+    General: "bg-gray-400",
+    Holiday: "bg-green-500",
+    Exam: "bg-red-500",
+    Event: "bg-blue-500",
+    Meeting: "bg-purple-500",
+  }
 
   const prev = () => { if (month === 0) { setMonth(11); setYear(y => y - 1) } else { setMonth(m => m - 1) }; setSelected(null) }
   const next = () => { if (month === 11) { setMonth(0); setYear(y => y + 1) } else { setMonth(m => m + 1) }; setSelected(null) }
@@ -3089,11 +3107,10 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
   }, [])
 
   useEffect(() => {
-    const unsubs: (() => void)[] = []
-
     const loadAnnouncements = async () => {
       try {
-        const docs = await pb.collection("announcements").getFullList({ requestKey: null })
+        const { data } = await supabase.from("announcements").select("*").order("created_at", { ascending: false })
+        const docs = data ?? []
         const byDate: Record<string, { id: string; text: string; category: string }[]> = {}
         for (const d of docs) {
           const k = d.date
@@ -3104,17 +3121,14 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
       } catch { /* offline */ }
     }
 
-    const subscribe = async () => {
-      try {
-        const u = await pb.collection("announcements").subscribe("*", () => { loadAnnouncements() })
-        unsubs.push(u)
-      } catch { /* realtime unavailable */ }
-    }
+    const channel = supabase
+      .channel("student-announcements-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "announcements" }, () => { loadAnnouncements() })
+      .subscribe()
 
     loadAnnouncements()
-    subscribe()
 
-    return () => { unsubs.forEach((u) => { try { u() } catch { /* ignore */ } }) }
+    return () => { supabase.removeChannel(channel) }
   }, [])
 
   const selectedKey = selected?.toString() ?? ""
@@ -3150,18 +3164,21 @@ function CalendarWidget({ t }: { t: (text: string) => string }) {
             const day = i + 1
             const isToday = day === today.getDate() && month === today.getMonth() && year === today.getFullYear()
             const isSelected = day === selected
-            const isPast = year < today.getFullYear() || (year === today.getFullYear() && month < today.getMonth()) || (year === today.getFullYear() && month === today.getMonth() && day < today.getDate())
             const hasEvents = (events[String(day)]?.length ?? 0) > 0 || (announcements[`${year}-${month}-${day}`]?.length ?? 0) > 0
             const totalCount = (events[String(day)]?.length ?? 0) + (announcements[`${year}-${month}-${day}`]?.length ?? 0)
+            const dayAnnouncements = announcements[`${year}-${month}-${day}`] ?? []
+            const singleDotColor = dayAnnouncements.length > 0
+              ? (categoryDotColors[dayAnnouncements[0]?.category] || "bg-navy-500")
+              : "bg-navy-500"
             return (
-              <button key={day} onClick={() => !isPast && setSelected(day)} disabled={isPast}
+              <button key={day} onClick={() => setSelected(day)}
                 className={`flex flex-col items-center justify-center rounded-lg text-sm font-medium transition relative min-h-[48px]
-                  ${isPast ? "text-gray-300 cursor-not-allowed" : isSelected ? "bg-navy-500 text-white shadow-md shadow-navy-500/25 z-10" : isToday ? "bg-navy-50 text-navy-700 font-bold ring-2 ring-navy-200" : "hover:bg-gray-50 text-gray-700"}`}>
+                  ${isSelected ? "bg-navy-500 text-white shadow-md shadow-navy-500/25 z-10" : isToday ? "bg-navy-50 text-navy-700 font-bold ring-2 ring-navy-200" : "hover:bg-gray-50 text-gray-700"}`}>
                 <span>{day}</span>
                 {hasEvents && (
                   totalCount > 1
-                    ? <span className={`absolute bottom-2 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold flex items-center justify-center leading-none ${isSelected ? "bg-white text-navy-500" : "bg-navy-500 text-white"}`}>{totalCount}</span>
-                    : <span className={`absolute bottom-2 w-1.5 h-1.5 rounded-full ${isSelected ? "bg-white" : "bg-navy-500"}`} />
+                    ? <span className={`absolute bottom-2 min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-bold flex items-center justify-center leading-none shadow-sm ${isSelected ? "bg-white text-navy-500" : "bg-navy-500 text-white"}`}>{totalCount}</span>
+                    : <span className={`absolute bottom-[13px] w-2 h-2 rounded-full ${singleDotColor} cal-dot-pulse ${isSelected ? "ring-2 ring-white" : ""}`} />
                 )}
               </button>
             )

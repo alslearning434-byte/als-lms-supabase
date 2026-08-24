@@ -8,7 +8,7 @@ import { readdirSync, statSync, createWriteStream } from "fs"
 import { mkdir, readFile, readdir, unlink, writeFile, rm } from "fs/promises"
 import { fileURLToPath } from "url"
 import { dirname, join, extname, basename } from "path"
-import PocketBase from "pocketbase"
+import { createClient } from "@supabase/supabase-js"
 import { createGzip, createGunzip } from "zlib"
 import { pipeline } from "stream/promises"
 import { Readable } from "stream"
@@ -30,31 +30,25 @@ app.use((req, res, next) => {
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || null
 
-// ── PocketBase (server-side) ──
+// ── Supabase (server-side) ──
 
-const PB_URL = process.env.POCKETBASE_URL || "http://127.0.0.1:8090"
-const PB_SUPERUSER_EMAIL = process.env.POCKETBASE_SUPERUSER_EMAIL || "admin@local.test"
-const PB_SUPERUSER_PASSWORD = process.env.POCKETBASE_SUPERUSER_PASSWORD || "admin12345"
+const SUPABASE_URL = process.env.SUPABASE_URL || "https://rvzinlsvuguyiogetbee.supabase.co"
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ2emlubHN2dWd1eWlvZ2V0YmVlIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzEyNjAxMSwiZXhwIjoyMTAyNzAyMDExfQ._dMR2Ba9fAVdtPNsc_rpun0giI3kDexQ1QuRdfVT1BQ"
 
-const pb = new PocketBase(PB_URL)
-
-let pbAuthPromise = null
-async function ensurePB() {
-  if (pb.authStore.isValid) return
-  if (pbAuthPromise) return pbAuthPromise
-  pbAuthPromise = pb
-    .collection("_superusers")
-    .authWithPassword(PB_SUPERUSER_EMAIL, PB_SUPERUSER_PASSWORD)
-    .then(() => { pbAuthPromise = null })
-    .catch((err) => { pbAuthPromise = null; throw err })
-  return pbAuthPromise
-}
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 const BACKUP_DIR = join(__dirname, "backups")
-const BACKUP_COLLECTIONS = [
-  "users", "resources", "moduleProgress", "assessmentSubmissions",
-  "quizSubmissions", "assignmentSubmissions", "activities", "backups",
+const BACKUP_TABLES = [
+  "profiles", "resources", "module_progress", "assessment_submissions",
+  "quiz_submissions", "assignment_submissions", "activities", "backups",
 ]
+const RESTORE_TABLE_MAP = {
+  users: "profiles",
+  moduleProgress: "module_progress",
+  assignmentSubmissions: "assignment_submissions",
+  quizSubmissions: "quiz_submissions",
+  assessmentSubmissions: "assessment_submissions",
+}
 const BACKUP_HOUR = 17
 const BACKUP_RETENTION_DAYS = 30
 const BACKUP_CHUNK_SIZE_MB = 50
@@ -77,13 +71,12 @@ let nextBackupAt = null
 
 async function logBackupActivity(action, detail) {
   try {
-    await ensurePB()
-    await pb.collection("activities").create({
+    await supabase.from("activities").insert({
       status: "Completed",
-      user: "system",
+      user_name: "system",
       action,
       detail,
-      createdAt: new Date().toISOString(),
+      created_at: new Date().toISOString(),
     })
   } catch { /* activity log is non-critical */ }
 }
@@ -92,13 +85,13 @@ async function runBackup(type = "Manual") {
   if (backupInProgress) throw new Error("A backup is already in progress. Please wait for it to finish.")
   backupInProgress = true
   try {
-    await ensurePB()
     const now = new Date()
     const backupId = `${now.getTime()}`
     const collections = {}
     let docCount = 0
-    for (const name of BACKUP_COLLECTIONS) {
-      const records = await pb.collection(name).getFullList({ requestKey: null })
+    for (const name of BACKUP_TABLES) {
+      const { data } = await supabase.from(name).select("*")
+      const records = data ?? []
       collections[name] = records.map((d) => ({ id: d.id, data: d }))
       docCount += records.length
     }
@@ -144,12 +137,13 @@ async function runBackup(type = "Manual") {
       size: formatBytes(artifactBytes),
       bytes: artifactBytes,
       status: "Completed",
-      createdAt: now.toISOString(),
-      fileId: fileName,
-      docCount,
-      fileCount: files.length,
+      created_at: now.toISOString(),
+      file_id: fileName,
+      doc_count: docCount,
+      file_count: files.length,
     }
-    const ref = await pb.collection("backups").create(record)
+    const { data: ref, error: backupErr } = await supabase.from("backups").insert(record).select().single()
+    if (backupErr) throw backupErr
     await logBackupActivity(
       type === "Manual" ? "Manual Backup" : "Automatic Backup",
       `Database backup completed (${docCount} docs, ${files.length} files, ${formatBytes(artifactBytes)})`
@@ -183,21 +177,20 @@ async function cleanupOldBackups() {
   }
 
   try {
-    await ensurePB()
     const cutoffIso = new Date(cutoff).toISOString()
-    const records = await pb.collection("backups").getFullList({ requestKey: null })
+    const { data } = await supabase.from("backups").select("*")
     let count = 0
-    for (const rec of records) {
-      if (rec.createdAt && rec.createdAt < cutoffIso) {
-        await pb.collection("backups").delete(rec.id)
+    for (const rec of data ?? []) {
+      if (rec.created_at && rec.created_at < cutoffIso) {
+        await supabase.from("backups").delete().eq("id", rec.id)
         count++
       }
     }
     if (count > 0) {
-      console.log(`Deleted ${count} old backup records from PocketBase`)
+      console.log(`Deleted ${count} old backup records from Supabase`)
     }
   } catch (err) {
-    console.error("PocketBase backup cleanup failed:", err.message)
+    console.error("Supabase backup cleanup failed:", err.message)
   }
 }
 
@@ -851,20 +844,15 @@ app.post("/api/backups/run", async (_req, res) => {
 })
 
 async function getBackupRecord(id) {
-  await ensurePB()
-  try {
-    return await pb.collection("backups").getOne(id)
-  } catch (err) {
-    if (err.status === 404) return null
-    throw err
-  }
+  const { data } = await supabase.from("backups").select("*").eq("id", id).maybeSingle()
+  return data ?? null
 }
 
 app.get("/api/backups/:id/download", async (req, res) => {
   try {
     const record = await getBackupRecord(req.params.id)
     if (!record) return res.status(404).json({ error: "Backup record not found" })
-    const fileName = record.fileId
+    const fileName = record.file_id
     if (!fileName) return res.status(404).json({ error: "No artifact stored for this backup" })
     const filePath = join(BACKUP_DIR, basename(fileName))
     try {
@@ -885,7 +873,7 @@ app.get("/api/backups/:id/preview", async (req, res) => {
   try {
     const record = await getBackupRecord(req.params.id)
     if (!record) return res.status(404).json({ error: "Backup record not found" })
-    const fileName = record.fileId
+    const fileName = record.file_id
     if (!fileName) return res.status(404).json({ error: "No artifact stored for this backup" })
     const filePath = join(BACKUP_DIR, basename(fileName))
     let raw
@@ -922,7 +910,7 @@ app.post("/api/backups/:id/restore", async (req, res) => {
   try {
     const record = await getBackupRecord(req.params.id)
     if (!record) return res.status(404).json({ error: "Backup record not found" })
-    const fileName = record.fileId
+    const fileName = record.file_id
     if (!fileName) return res.status(400).json({ error: "No artifact stored for this backup" })
     const filePath = join(BACKUP_DIR, basename(fileName))
     let raw
@@ -935,13 +923,13 @@ app.post("/api/backups/:id/restore", async (req, res) => {
     }
     const artifact = JSON.parse(raw)
 
-    await ensurePB()
     let restoredDocs = 0
     let restoredFiles = 0
     for (const [name, docs] of Object.entries(artifact.collections || {})) {
-      if (name === "users") {
-        // PocketBase auth records cannot be restored without their password hashes;
-        // skip user records during restore (re-seed via migration script instead).
+      const table = RESTORE_TABLE_MAP[name] || name
+      if (table === "profiles") {
+        // Auth-linked profile records cannot be safely restored out of band;
+        // skip them during restore (re-seed via migration script instead).
         continue
       }
       for (const entry of docs) {
@@ -951,15 +939,19 @@ app.post("/api/backups/:id/restore", async (req, res) => {
           delete data.id
           delete data.collectionId
           delete data.collectionName
-          await pb.collection(name).update(entry.id, data)
-          restoredDocs++
+          const { data: updated } = await supabase.from(table).update(data).eq("id", entry.id).select().single()
+          if (updated) {
+            restoredDocs++
+            continue
+          }
+          throw new Error("row not found")
         } catch {
           try {
             const data = { ...entry.data }
             delete data.id
             delete data.collectionId
             delete data.collectionName
-            await pb.collection(name).create(data)
+            await supabase.from(table).insert({ ...data, id: entry.id })
             restoredDocs++
           } catch { /* record cannot be restored */ }
         }
@@ -983,10 +975,10 @@ app.delete("/api/backups/:id", async (req, res) => {
   try {
     const record = await getBackupRecord(req.params.id)
     if (!record) return res.status(404).json({ error: "Backup record not found" })
-    if (record.fileId) {
-      try { await unlink(join(BACKUP_DIR, basename(record.fileId))) } catch { /* already gone */ }
+    if (record.file_id) {
+      try { await unlink(join(BACKUP_DIR, basename(record.file_id))) } catch { /* already gone */ }
     }
-    await pb.collection("backups").delete(record.id)
+    await supabase.from("backups").delete().eq("id", record.id)
     await logBackupActivity("Backup Deleted", `Backup from ${record.date} at ${record.time} was removed`)
     return res.json({ success: true })
   } catch (err) {
@@ -1032,25 +1024,21 @@ function toApiUser(rec) {
     email: rec.email || "",
     role: rec.role || "student",
     lrn: rec.lrn || "",
-    gradeLevel: rec.gradeLevel || "",
+    gradeLevel: rec.grade_level || "",
     phone: rec.phone || "",
-    employeeId: rec.employeeId || "",
+    employeeId: rec.employee_id || "",
     department: rec.department || "",
-    joinDate: rec.joinDate || "",
+    joinDate: rec.join_date || "",
   }
 }
 
 async function findUserByUid(uid) {
-  await ensurePB()
-  try {
-    return await pb.collection("users").getOne(uid)
-  } catch {
-    try {
-      return await pb.collection("users").getFirstListItem(pb.filter("uid = {:uid}", { uid }))
-    } catch {
-      return null
-    }
+  let { data } = await supabase.from("profiles").select("*").eq("id", uid).single()
+  if (!data) {
+    const res = await supabase.from("profiles").select("*").eq("uid", uid).maybeSingle()
+    data = res.data
   }
+  return data ?? null
 }
 
 app.get("/api/user/:uid", async (req, res) => {
@@ -1067,11 +1055,12 @@ app.get("/api/users/search", async (req, res) => {
   try {
     const { email } = req.query
     if (!email) return res.status(400).json({ error: "Email query parameter required" })
-    await ensurePB()
-    const rec = await pb.collection("users").getFirstListItem(pb.filter("email = {:email}", { email: email.toLowerCase() }))
+    const { data: rec, error } = await supabase.from("profiles").select("*").eq("email", email.toLowerCase()).maybeSingle()
+    if (error) return res.status(500).json({ error: "User not found" })
+    if (!rec) return res.status(404).json({ error: "User not found" })
     res.json(toApiUser(rec))
   } catch (err) {
-    res.status(err.status === 404 ? 404 : 500).json({ error: "User not found" })
+    res.status(500).json({ error: "User not found" })
   }
 })
 
@@ -1079,26 +1068,28 @@ app.post("/api/user/:uid", async (req, res) => {
   try {
     const { uid } = req.params
     const data = req.body
-    await ensurePB()
     const existing = await findUserByUid(uid)
     const payload = {
       name: data.displayName || data.name || "",
       email: data.email || "",
       role: data.role || "student",
       lrn: data.lrn || "",
-      gradeLevel: data.gradeLevel || "",
+      grade_level: data.gradeLevel || "",
       phone: data.phone || "",
-      employeeId: data.employeeId || "",
+      employee_id: data.employeeId || "",
       department: data.department || "",
-      joinDate: data.joinDate || "",
+      join_date: data.joinDate || "",
       uid,
     }
     let rec
     if (existing) {
-      rec = await pb.collection("users").update(existing.id, payload)
+      const { data: updated, error } = await supabase.from("profiles").update(payload).eq("id", existing.id).select().single()
+      if (error) throw error
+      rec = updated
     } else {
-      const password = data.password || `ALS${Math.random().toString(36).slice(2, 10)}`
-      rec = await pb.collection("users").create({ ...payload, password, passwordConfirm: password })
+      const { data: inserted, error } = await supabase.from("profiles").insert(payload).select().single()
+      if (error) throw error
+      rec = inserted
     }
     res.json(toApiUser(rec))
   } catch (err) {
@@ -1110,16 +1101,17 @@ app.patch("/api/user/:uid", async (req, res) => {
   try {
     const { uid } = req.params
     const data = req.body
-    await ensurePB()
     const existing = await findUserByUid(uid)
     if (!existing) return res.status(404).json({ error: "User not found" })
+    const fieldMap = { gradeLevel: "grade_level", employeeId: "employee_id", joinDate: "join_date" }
     const payload = {}
     if (data.displayName !== undefined) payload.name = data.displayName
     if (data.email !== undefined) payload.email = data.email
     for (const k of ["lrn", "gradeLevel", "phone", "employeeId", "department", "joinDate"]) {
-      if (data[k] !== undefined) payload[k] = data[k]
+      if (data[k] !== undefined) payload[fieldMap[k] || k] = data[k]
     }
-    const rec = await pb.collection("users").update(existing.id, payload)
+    const { data: rec, error } = await supabase.from("profiles").update(payload).eq("id", existing.id).select().single()
+    if (error) throw error
     res.json(toApiUser(rec))
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -1128,9 +1120,8 @@ app.patch("/api/user/:uid", async (req, res) => {
 
 app.get("/api/users", async (_req, res) => {
   try {
-    await ensurePB()
-    const records = await pb.collection("users").getFullList({ requestKey: null })
-    res.json(records.map(toApiUser))
+    const { data } = await supabase.from("profiles").select("*")
+    res.json((data ?? []).map(toApiUser))
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -1140,9 +1131,8 @@ app.get("/api/users", async (_req, res) => {
 
 app.get("/api/backups", async (_req, res) => {
   try {
-    await ensurePB()
-    const records = await pb.collection("backups").getFullList({ sort: "-createdAt", requestKey: null })
-    res.json(records.map((d) => ({ id: d.id, ...d })))
+    const { data } = await supabase.from("backups").select("*").order("created_at", { ascending: false })
+    res.json((data ?? []).map((d) => ({ id: d.id, ...d })))
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -1150,9 +1140,8 @@ app.get("/api/backups", async (_req, res) => {
 
 app.get("/api/activities", async (_req, res) => {
   try {
-    await ensurePB()
-    const records = await pb.collection("activities").getFullList({ sort: "-createdAt", requestKey: null })
-    res.json(records.map((d) => ({ id: d.id, ...d })))
+    const { data } = await supabase.from("activities").select("*").order("created_at", { ascending: false })
+    res.json((data ?? []).map((d) => ({ id: d.id, ...d })))
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -1176,21 +1165,19 @@ function getCohortFromGrade(gradeLevel) {
 }
 
 async function getAllResources() {
-  await ensurePB()
-  const records = await pb.collection("resources").getFullList({ requestKey: null })
-  return records.map((d) => ({ id: d.id, ...d }))
+  const { data } = await supabase.from("resources").select("*")
+  return (data ?? []).map((d) => ({ id: d.id, ...d }))
 }
 
 async function getAllUsers() {
-  await ensurePB()
-  const records = await pb.collection("users").getFullList({ requestKey: null })
-  return records.map(toApiUser)
+  const { data } = await supabase.from("profiles").select("*")
+  return (data ?? []).map(toApiUser)
 }
 
 function countTasksByType(resources, cohort) {
   const counts = { assignment: 0, quiz: 0, discussion: 0, material: 0 }
   resources.forEach((r) => {
-    const resourceCohort = getCohortFromGrade(r.targetGrade) || (r.subject?.toLowerCase().includes("shs") ? "shs" : "jhs")
+    const resourceCohort = getCohortFromGrade(r.target_grade) || (r.subject?.toLowerCase().includes("shs") ? "shs" : "jhs")
     if (cohort && resourceCohort !== cohort) return
     r.modules?.forEach((m) => {
       m.tasks?.forEach((t) => {
@@ -1202,13 +1189,16 @@ function countTasksByType(resources, cohort) {
 }
 
 async function getSubmissionCounts(cohort = null) {
-  await ensurePB()
-  const [assignments, quizzes, assessments, progress] = await Promise.all([
-    pb.collection("assignmentSubmissions").getFullList({ requestKey: null }),
-    pb.collection("quizSubmissions").getFullList({ requestKey: null }),
-    pb.collection("assessmentSubmissions").getFullList({ requestKey: null }),
-    pb.collection("moduleProgress").getFullList({ requestKey: null }),
+  const [assignmentsRes, quizzesRes, assessmentsRes, progressRes] = await Promise.all([
+    supabase.from("assignment_submissions").select("*"),
+    supabase.from("quiz_submissions").select("*"),
+    supabase.from("assessment_submissions").select("*"),
+    supabase.from("module_progress").select("*"),
   ])
+  const assignments = assignmentsRes.data ?? []
+  const quizzes = quizzesRes.data ?? []
+  const assessments = assessmentsRes.data ?? []
+  const progress = progressRes.data ?? []
 
   const discussions = assessments.filter((d) => d.type === "discussion")
 
@@ -1224,36 +1214,36 @@ async function getSubmissionCounts(cohort = null) {
   const byStudent = {}
 
   assignments.forEach((data) => {
-    const sc = studentCohorts[data.studentId]
+    const sc = studentCohorts[data.student_id]
     if (cohort && sc !== cohort) return
     counts.assignment++
-    byStudent[data.studentId] = byStudent[data.studentId] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
-    byStudent[data.studentId].assignment++
+    byStudent[data.student_id] = byStudent[data.student_id] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
+    byStudent[data.student_id].assignment++
   })
 
   quizzes.forEach((data) => {
-    const sc = studentCohorts[data.studentId]
+    const sc = studentCohorts[data.student_id]
     if (cohort && sc !== cohort) return
     counts.quiz++
-    byStudent[data.studentId] = byStudent[data.studentId] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
-    byStudent[data.studentId].quiz++
+    byStudent[data.student_id] = byStudent[data.student_id] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
+    byStudent[data.student_id].quiz++
   })
 
   discussions.forEach((data) => {
-    const sc = studentCohorts[data.studentId]
+    const sc = studentCohorts[data.student_id]
     if (cohort && sc !== cohort) return
     counts.discussion++
-    byStudent[data.studentId] = byStudent[data.studentId] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
-    byStudent[data.studentId].discussion++
+    byStudent[data.student_id] = byStudent[data.student_id] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
+    byStudent[data.student_id].discussion++
   })
 
   progress.forEach((data) => {
-    const sc = studentCohorts[data.userId]
+    const sc = studentCohorts[data.user_id]
     if (cohort && sc !== cohort) return
-    if (data.progress === 100 || data.completedAt) {
+    if (data.progress === 100 || data.completed_at) {
       counts.material++
-      byStudent[data.userId] = byStudent[data.userId] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
-      byStudent[data.userId].material++
+      byStudent[data.user_id] = byStudent[data.user_id] || { assignment: 0, quiz: 0, discussion: 0, material: 0 }
+      byStudent[data.user_id].material++
     }
   })
 

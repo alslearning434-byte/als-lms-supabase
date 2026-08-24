@@ -7,7 +7,7 @@ import LogoutModal from "../components/LogoutModal"
 import ChangePasswordModal from "../components/ChangePasswordModal"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
-import { pb, getActivities, subscribeActivities } from "../pocketbase"
+import { supabase, getActivities, subscribeActivities } from "../supabase"
 import type { NavItem } from "../types"
 
 const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/+$/, "")
@@ -36,6 +36,13 @@ const categoryStyles: Record<string, string> = {
   Exam: "bg-red-100 text-red-600",
   Event: "bg-blue-100 text-blue-600",
   Meeting: "bg-purple-100 text-purple-600",
+}
+const categoryDotColors: Record<string, string> = {
+  General: "bg-gray-400",
+  Holiday: "bg-green-500",
+  Exam: "bg-red-500",
+  Event: "bg-blue-500",
+  Meeting: "bg-purple-500",
 }
 
 export default function Admin() {
@@ -137,33 +144,25 @@ export default function Admin() {
   }, [])
 
   useEffect(() => {
-    let unsubPocket: (() => void) | null = null
-
     loadBackups()
 
-    const subscribe = async () => {
-      try {
-        unsubPocket = await pb.collection("backups").subscribe("*", () => { loadBackups() })
-      } catch { /* realtime unavailable */ }
-    }
-    subscribe()
+    const channel = supabase
+      .channel("backups-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "backups" }, () => { loadBackups() })
+      .subscribe()
 
-    return () => { unsubPocket?.() }
+    return () => { supabase.removeChannel(channel) }
   }, [])
 
   useEffect(() => {
-    let unsubPocket: (() => void) | null = null
-
     loadAnnouncements()
 
-    const subscribe = async () => {
-      try {
-        unsubPocket = await pb.collection("announcements").subscribe("*", () => { loadAnnouncements() })
-      } catch { /* realtime unavailable */ }
-    }
-    subscribe()
+    const channel = supabase
+      .channel("announcements-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "announcements" }, () => { loadAnnouncements() })
+      .subscribe()
 
-    return () => { unsubPocket?.() }
+    return () => { supabase.removeChannel(channel) }
   }, [])
 
   useEffect(() => {
@@ -230,7 +229,8 @@ export default function Admin() {
 
   const loadBackups = async () => {
     try {
-      const docs = await pb.collection("backups").getFullList({ sort: "-createdAt" })
+      const { data } = await supabase.from("backups").select("*").order("created_at", { ascending: false })
+      const docs = data ?? []
       const items = docs.map((d) => ({
         id: d.id,
         date: d.date || "",
@@ -243,7 +243,7 @@ export default function Admin() {
           : String(d.status || "").toLowerCase().includes("fail")
             ? "bg-red-100 text-red-600"
             : "bg-amber-100 text-amber-600",
-        fileId: d.fileId || "",
+        fileId: d.file_id || "",
       }))
       setBackups(items)
     } catch { /* offline */ }
@@ -314,7 +314,8 @@ export default function Admin() {
 
   const loadAnnouncements = async () => {
     try {
-      const docs = await pb.collection("announcements").getFullList({ sort: "-createdAt", requestKey: null })
+      const { data } = await supabase.from("announcements").select("*").order("created_at", { ascending: false })
+      const docs = data ?? []
       const byDate: Record<string, { id: string; text: string; category: string }[]> = {}
       for (const d of docs) {
         const k = d.date
@@ -327,7 +328,7 @@ export default function Admin() {
 
   const handleDeleteAnnouncement = async (id: string, key: string) => {
     try {
-      await pb.collection("announcements").delete(id)
+      await supabase.from("announcements").delete().eq("id", id)
       setAnnouncements((prev) => ({ ...prev, [key]: (prev[key] ?? []).filter((a) => a.id !== id) }))
     } catch { /* offline */ }
   }
@@ -455,6 +456,10 @@ export default function Admin() {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      <style>{`
+        @keyframes dotPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(59,77,130,0.4); } 50% { box-shadow: 0 0 0 4px rgba(59,77,130,0); } }
+        .cal-dot-pulse { animation: dotPulse 2s ease-in-out infinite; }
+      `}</style>
       <Sidebar title="ALS Learning" subtitle="Admin Console" items={navItems} activePage={activePage} onNavigate={goTo} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
 
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -769,19 +774,18 @@ export default function Admin() {
                         try {
                           const now = new Date()
                           const joinDate = `${["January","February","March","April","May","June","July","August","September","October","November","December"][now.getMonth()]} ${now.getFullYear()}`
-                          const rec = await pb.collection("users").create({
+                          const { data: rec, error } = await supabase.from("profiles").insert({
                             email: teacherForm.email,
-                            password: teacherForm.password,
-                            passwordConfirm: teacherForm.password,
                             name: teacherForm.name.trim(),
                             role: "teacher",
-                            employeeId: teacherForm.employeeId.trim(),
+                            employee_id: teacherForm.employeeId.trim(),
                             department: teacherForm.department,
                             phone: teacherForm.contact.trim(),
-                            joinDate,
-                          })
+                            join_date: joinDate,
+                          }).select().single()
+                          if (error) throw new Error(error.message)
                           const uid = rec.id
-                          await pb.collection("users").update(uid, { uid })
+                          await supabase.from("profiles").update({ uid }).eq("id", uid).select().single()
                           setTeachers((prev) => [...prev, {
                             uid,
                             displayName: teacherForm.name.trim(),
@@ -1297,8 +1301,8 @@ export default function Admin() {
                           <span>{day}</span>
                           {hasEvents && (
                             announcements[key].length > 1
-                              ? <span className={`absolute bottom-2 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold flex items-center justify-center leading-none ${isSelected ? "bg-white text-navy-500" : "bg-navy-500 text-white"}`}>{announcements[key].length}</span>
-                              : <span className={`absolute bottom-2 w-1.5 h-1.5 rounded-full ${isSelected ? "bg-white" : "bg-navy-500"}`} />
+                              ? <span className={`absolute bottom-2 min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-bold flex items-center justify-center leading-none shadow-sm ${isSelected ? "bg-white text-navy-500" : "bg-navy-500 text-white"}`}>{announcements[key].length}</span>
+                              : <span className={`absolute bottom-[13px] w-2 h-2 rounded-full ${(categoryDotColors[announcements[key][0]?.category] || "bg-navy-500")} cal-dot-pulse ${isSelected ? "ring-2 ring-white" : ""}`} />
                           )}
                         </button>
                       )
@@ -1388,8 +1392,8 @@ export default function Admin() {
                         if (!calInput.trim()) return
                         const key = `${calYear}-${calMonth}-${calSelected}`
                         try {
-                          const rec = await pb.collection("announcements").create({ date: key, text: calInput.trim(), category: calCategory })
-                          setAnnouncements(prev => ({ ...prev, [key]: [...(prev[key] ?? []), { id: rec.id, text: rec.text, category: rec.category || calCategory }] }))
+                          const { data: rec } = await supabase.from("announcements").insert({ date: key, text: calInput.trim(), category: calCategory }).select().single()
+                          if (rec) setAnnouncements(prev => ({ ...prev, [key]: [...(prev[key] ?? []), { id: rec.id, text: rec.text, category: rec.category || calCategory }] }))
                         } catch { /* offline */ }
                         setCalInput("")
                         setCalCategory("General")

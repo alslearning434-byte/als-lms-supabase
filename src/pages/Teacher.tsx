@@ -10,7 +10,7 @@ import ChangePasswordModal from "../components/ChangePasswordModal"
 import { useTheme } from "../context/ThemeContext"
 import { useAuth } from "../context/AuthContext"
 import { assignments } from "../data/assignments"
-import { pb } from "../pocketbase"
+import { supabase } from "../supabase"
 import type { NavItem, Resource, ModuleContent, ModuleBlock, TableData } from "../types"
 import { getSubjectIcon } from "../utils/subjectIcons"
 import ImageCarousel from "../components/ImageCarousel"
@@ -32,6 +32,13 @@ const categoryStyles: Record<string, string> = {
   Exam: "bg-red-100 text-red-600",
   Event: "bg-blue-100 text-blue-600",
   Meeting: "bg-purple-100 text-purple-600",
+}
+const categoryDotColors: Record<string, string> = {
+  General: "bg-gray-400",
+  Holiday: "bg-green-500",
+  Exam: "bg-red-500",
+  Event: "bg-blue-500",
+  Meeting: "bg-purple-500",
 }
 
 function cohortFromGrade(gradeLevel: string | undefined | null): "jhs" | "shs" | null {
@@ -229,16 +236,17 @@ export default function Teacher() {
 
     const loadResources = async () => {
       try {
-        const docs = await pb.collection("resources").getFullList()
+        const { data } = await supabase.from("resources").select("*")
+        const docs = data ?? []
         const items: Resource[] = docs.map((data) => {
           return {
             id: data.id,
             subject: data.subject || "",
             title: data.title || "",
             description: data.description || "",
-            targetGrade: data.targetGrade || "",
-            uploadedBy: data.uploadedBy || "",
-            uploadedAt: data.uploadedAt || "",
+            targetGrade: data.target_grade || "",
+            uploadedBy: data.uploaded_by || "",
+            uploadedAt: data.uploaded_at || "",
             modules: (data.modules || []).map((m: any) => {
               if (m.blocks) {
                 return { ...m, blocks: m.blocks.map((b: any) => ({ id: b.id, type: b.type, topic: b.topic, description: b.description, imageData: b.imageData })) }
@@ -266,8 +274,11 @@ export default function Teacher() {
 
     const subscribe = async () => {
       try {
-        const u = await pb.collection("resources").subscribe("*", () => { loadResources() })
-        unsubs.push(u)
+        const channel = supabase
+          .channel("table-changes-resources")
+          .on("postgres_changes", { event: "*", schema: "public", table: "resources" }, async () => { loadResources() })
+          .subscribe()
+        unsubs.push(() => supabase.removeChannel(channel))
       } catch { /* realtime unavailable */ }
     }
 
@@ -282,7 +293,8 @@ export default function Teacher() {
 
     const loadUsers = async () => {
       try {
-        const docs = await pb.collection("users").getFullList()
+        const { data } = await supabase.from("profiles").select("*")
+        const docs = data ?? []
         const userMap: Record<string, string> = {}
         docs.forEach((d) => {
           if (d.name) userMap[d.uid || d.id] = d.name
@@ -293,10 +305,14 @@ export default function Teacher() {
 
     const loadSubmissions = async () => {
       try {
-        const assign = await pb.collection("assignmentSubmissions").getFullList()
-        const quiz = await pb.collection("quizSubmissions").getFullList()
-        const assess = await pb.collection("assessmentSubmissions").getFullList()
-        const progress = await pb.collection("moduleProgress").getFullList()
+        const { data: assignData } = await supabase.from("assignment_submissions").select("*")
+        const assign = assignData ?? []
+        const { data: quizData } = await supabase.from("quiz_submissions").select("*")
+        const quiz = quizData ?? []
+        const { data: assessData } = await supabase.from("assessment_submissions").select("*")
+        const assess = assessData ?? []
+        const { data: progressData } = await supabase.from("module_progress").select("*")
+        const progress = progressData ?? []
         setSubAssign(assign.map((d) => ({ ...d })))
         setSubQuiz(quiz.map((d) => ({ ...d })))
         setSubAssess(assess.map((d) => ({ ...d })))
@@ -309,12 +325,33 @@ export default function Teacher() {
 
     const subscribe = async () => {
       try {
-        const u1 = await pb.collection("users").subscribe("*", () => { loadUsers() })
-        const u2 = await pb.collection("assignmentSubmissions").subscribe("*", () => { loadSubmissions() })
-        const u3 = await pb.collection("quizSubmissions").subscribe("*", () => { loadSubmissions() })
-        const u4 = await pb.collection("assessmentSubmissions").subscribe("*", () => { loadSubmissions() })
-        const u5 = await pb.collection("moduleProgress").subscribe("*", () => { loadSubmissions() })
-        unsubs.push(u1, u2, u3, u4, u5)
+        const ch1 = supabase
+          .channel("table-changes-profiles")
+          .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, async () => { loadUsers() })
+          .subscribe()
+        const ch2 = supabase
+          .channel("table-changes-assignment-submissions")
+          .on("postgres_changes", { event: "*", schema: "public", table: "assignment_submissions" }, async () => { loadSubmissions() })
+          .subscribe()
+        const ch3 = supabase
+          .channel("table-changes-quiz-submissions")
+          .on("postgres_changes", { event: "*", schema: "public", table: "quiz_submissions" }, async () => { loadSubmissions() })
+          .subscribe()
+        const ch4 = supabase
+          .channel("table-changes-assessment-submissions")
+          .on("postgres_changes", { event: "*", schema: "public", table: "assessment_submissions" }, async () => { loadSubmissions() })
+          .subscribe()
+        const ch5 = supabase
+          .channel("table-changes-module-progress")
+          .on("postgres_changes", { event: "*", schema: "public", table: "module_progress" }, async () => { loadSubmissions() })
+          .subscribe()
+        unsubs.push(
+          () => supabase.removeChannel(ch1),
+          () => supabase.removeChannel(ch2),
+          () => supabase.removeChannel(ch3),
+          () => supabase.removeChannel(ch4),
+          () => supabase.removeChannel(ch5)
+        )
       } catch { /* realtime unavailable */ }
     }
     subscribe()
@@ -331,39 +368,39 @@ export default function Teacher() {
     }
     const entries: { id: string; name: string; title: string; submittedAt: string; type: "assignment" | "quiz" | "assessment" }[] = []
     subAssign.forEach((d) => {
-      const sub = d.submittedAt ? toDate(d.submittedAt) : ""
+      const sub = d.submitted_at ? toDate(d.submitted_at) : ""
       if (!sub) return
-      const res = resources.find(r => r.id === d.resourceId)
-      const mod = res?.modules?.[d.moduleIdx]
-      const task = mod?.tasks?.find(t => t.id === d.taskId)
+      const res = resources.find(r => r.id === d.resource_id)
+      const mod = res?.modules?.[d.module_idx]
+      const task = mod?.tasks?.find(t => t.id === d.task_id)
       entries.push({
         id: d.id,
-        name: d.studentName || subUsers[d.studentId] || d.studentId || "Unknown Student",
+        name: d.student_name || subUsers[d.student_id] || d.student_id || "Unknown Student",
         title: task?.title || (res ? `${res.title}${mod?.name ? ` - ${mod.name}` : ""}` : "Assignment Submission"),
         submittedAt: sub,
         type: "assignment",
       })
     })
     subQuiz.forEach((d) => {
-      const sub = d.submittedAt ? toDate(d.submittedAt) : ""
+      const sub = d.submitted_at ? toDate(d.submitted_at) : ""
       if (!sub) return
-      const res = resources.find(r => r.id === d.resourceId)
-      const mod = res?.modules?.[d.moduleIdx]
+      const res = resources.find(r => r.id === d.resource_id)
+      const mod = res?.modules?.[d.module_idx]
       entries.push({
         id: d.id,
-        name: d.studentName || subUsers[d.studentId] || d.studentId || "Unknown Student",
+        name: d.student_name || subUsers[d.student_id] || d.student_id || "Unknown Student",
         title: `${res?.title || "Resource"}${mod?.name ? ` - ${mod.name}` : ""} Quiz`,
         submittedAt: sub,
         type: "quiz",
       })
     })
     subAssess.forEach((d) => {
-      const sub = d.submittedAt ? toDate(d.submittedAt) : ""
+      const sub = d.submitted_at ? toDate(d.submitted_at) : ""
       if (!sub) return
-      const res = resources.find(r => r.id === d.resourceId)
+      const res = resources.find(r => r.id === d.resource_id)
       entries.push({
         id: d.id,
-        name: d.studentName || subUsers[d.studentId] || d.studentId || "Unknown Student",
+        name: d.student_name || subUsers[d.student_id] || d.student_id || "Unknown Student",
         title: `${res?.title || "Resource"} - Assessment`,
         submittedAt: sub,
         type: "assessment",
@@ -401,10 +438,10 @@ export default function Teacher() {
       if (completed[c][type] !== undefined) completed[c][type]++
       byStudent[studentId] = (byStudent[studentId] || 0) + 1
     }
-    subAssign.forEach((d) => addSub(d.studentId, "assignment"))
-    subQuiz.forEach((d) => addSub(d.studentId, "quiz"))
-    subAssess.forEach((d) => { if (d.type === "discussion") addSub(d.studentId, "discussion") })
-    moduleProgress.forEach((d) => { if (d.progress === 100 || d.completedAt) addSub(d.userId, "material") })
+    subAssign.forEach((d) => addSub(d.student_id, "assignment"))
+    subQuiz.forEach((d) => addSub(d.student_id, "quiz"))
+    subAssess.forEach((d) => { if (d.type === "discussion") addSub(d.student_id, "discussion") })
+    moduleProgress.forEach((d) => { if (d.progress === 100 || d.completedAt) addSub(d.user_id, "material") })
 
     const cohortData = (c: "jhs" | "shs") => {
       const tasksPerStudent = Object.values(taskCounts[c]).reduce((a, b) => a + b, 0)
@@ -446,9 +483,9 @@ export default function Teacher() {
       (r.modules || []).flatMap((m, mi) =>
         (m.tasks || []).map((t) => {
           const submitted =
-            subAssign.filter((d) => d.resourceId === r.id && d.moduleIdx === mi && d.taskId === t.id).length +
-            subQuiz.filter((d) => d.resourceId === r.id && d.moduleIdx === mi && d.taskId === t.id).length +
-            subAssess.filter((d) => d.resourceId === r.id && d.moduleIdx === mi && d.taskId === t.id).length
+            subAssign.filter((d) => d.resource_id === r.id && d.module_idx === mi && d.task_id === t.id).length +
+            subQuiz.filter((d) => d.resource_id === r.id && d.module_idx === mi && d.task_id === t.id).length +
+            subAssess.filter((d) => d.resource_id === r.id && d.module_idx === mi && d.task_id === t.id).length
           return {
             title: `${r.title}${m.name ? " - " + m.name : ""}${t.title ? " - " + t.title : ""}`,
             submitted,
@@ -472,14 +509,15 @@ export default function Teacher() {
 
     const loadUsers = async () => {
       try {
-        const docs = await pb.collection("users").getFullList()
+        const { data } = await supabase.from("profiles").select("*")
+        const docs = data ?? []
         let jhs = 0, shs = 0, total = 0
         const teacherList: { name: string; dept: string; email: string; status: string; level: string }[] = []
         const studentList: StudentEntry[] = []
         docs.forEach((data) => {
           if (data.role === "student") {
             total++
-            const gl = data.gradeLevel || ""
+            const gl = data.grade_level || ""
             if (gl.startsWith("Grade") && !gl.startsWith("Senior")) jhs++
             else shs++
             studentList.push({
@@ -512,8 +550,11 @@ export default function Teacher() {
     loadUsers()
     const subscribe = async () => {
       try {
-        const u = await pb.collection("users").subscribe("*", () => { loadUsers() })
-        unsubs.push(u)
+        const channel = supabase
+          .channel("table-changes-profiles-cohorts")
+          .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, async () => { loadUsers() })
+          .subscribe()
+        unsubs.push(() => supabase.removeChannel(channel))
       } catch { /* realtime unavailable */ }
     }
     subscribe()
@@ -526,7 +567,8 @@ export default function Teacher() {
 
     const loadAnnouncements = async () => {
       try {
-        const docs = await pb.collection("announcements").getFullList({ requestKey: null })
+        const { data } = await supabase.from("announcements").select("*")
+        const docs = data ?? []
         const byDate: Record<string, { id: string; text: string; category: string }[]> = {}
         for (const d of docs) {
           const k = d.date
@@ -539,8 +581,11 @@ export default function Teacher() {
 
     const subscribe = async () => {
       try {
-        const u = await pb.collection("announcements").subscribe("*", () => { loadAnnouncements() })
-        unsubs.push(u)
+        const channel = supabase
+          .channel("table-changes-announcements")
+          .on("postgres_changes", { event: "*", schema: "public", table: "announcements" }, async () => { loadAnnouncements() })
+          .subscribe()
+        unsubs.push(() => supabase.removeChannel(channel))
       } catch { /* realtime unavailable */ }
     }
 
@@ -633,16 +678,16 @@ export default function Teacher() {
         const existing = resources.find(r => r.id === editingResourceId)
         const payloadWithAssessment: Record<string, any> = { ...payload }
         if (existing?.assessment) payloadWithAssessment.assessment = stripUndefined(existing.assessment)
-        await pb.collection("resources").update(editingResourceId, payloadWithAssessment)
+        await supabase.from("resources").update(payloadWithAssessment).eq("id", editingResourceId).select().single()
         setResources((prev) => prev.map(r => r.id === editingResourceId ? { ...r, ...payload, modules: filteredModules, assessment: existing?.assessment } : r))
       } else {
-        const docRef = await pb.collection("resources").create({
+        const { data } = await supabase.from("resources").insert({
           ...payload,
-          uploadedBy: profile?.displayName || "Teacher",
-          uploadedAt: new Date().toISOString(),
-        })
+          uploaded_by: profile?.displayName || "Teacher",
+          uploaded_at: new Date().toISOString(),
+        }).select().single()
         setResources((prev) => [...prev, {
-          id: docRef.id,
+          id: data.id,
           ...payload,
           modules: filteredModules,
           uploadedBy: profile?.displayName || "Teacher",
@@ -716,7 +761,7 @@ export default function Teacher() {
   const handleDeleteResource = async () => {
     if (!deletingResourceId) return
     try {
-      await pb.collection("resources").delete(deletingResourceId)
+      await supabase.from("resources").delete().eq("id", deletingResourceId)
       setResources((prev) => prev.filter((r) => r.id !== deletingResourceId))
       if (previewResource?.id === deletingResourceId) setPreviewResource(null)
       if (editingAssessmentResourceId === deletingResourceId) setEditingAssessmentResourceId(null)
@@ -733,8 +778,17 @@ export default function Teacher() {
       delete cloned.id
       cloned.title = cloned.title + " (copy)"
       cloned.uploadedAt = new Date().toISOString()
-      const docRef = await pb.collection("resources").create(cloned)
-      setResources((prev) => [...prev, { ...cloned, id: docRef.id }])
+      const { data } = await supabase.from("resources").insert({
+        subject: cloned.subject,
+        title: cloned.title,
+        description: cloned.description,
+        modules: cloned.modules,
+        assessment: cloned.assessment ?? null,
+        target_grade: cloned.targetGrade || "",
+        uploaded_by: cloned.uploadedBy || "",
+        uploaded_at: cloned.uploadedAt,
+      }).select().single()
+      setResources((prev) => [...prev, { ...cloned, id: data.id }])
     } catch (err) {
       console.error("Failed to copy resource:", err)
     }
@@ -763,14 +817,15 @@ export default function Teacher() {
         .tiptap-preview img { max-width: 100%; border-radius: 8px; margin: 0.5rem 0; }
         .tiptap-preview img[data-float="left"] { float: left; margin: 0.25rem 1rem 0.5rem 0; max-width: 50%; }
         .tiptap-preview img[data-float="right"] { float: right; margin: 0.25rem 0 0.5rem 1rem; max-width: 50%; }
-        .tiptap-preview table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+        .tiptap-preview table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; table-layout: auto; }
         .tiptap-preview td, .tiptap-preview th { border: 1px solid #d1d5db; padding: 0.125rem 0.25rem; line-height: 1.4; }
         .tiptap-preview td p, .tiptap-preview th p { margin: 0; }
         .tiptap-preview th { background: #f3f4f6; font-weight: 600; }
         .tiptap-preview ul { list-style-type: disc; padding-left: 1.5rem; }
-        .tiptap-preview ol { list-style-type: decimal; padding-left: 1.5rem; }
         .tiptap-preview blockquote { border-left: 3px solid #d1d5db; padding-left: 0.75rem; color: #6b7280; font-style: italic; }
         .tiptap-preview a { color: #2563eb; text-decoration: underline; }
+        @keyframes dotPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(59,77,130,0.4); } 50% { box-shadow: 0 0 0 4px rgba(59,77,130,0); } }
+        .cal-dot-pulse { animation: dotPulse 2s ease-in-out infinite; }
       `}</style>
       <Sidebar title="ALS Learning" subtitle="Teacher Portal" items={navItems} activePage={activePage} onNavigate={goTo} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
 
@@ -1271,7 +1326,7 @@ export default function Teacher() {
                           try {
                             const draft = assessmentDraftRef.current ?? activeResource.assessment
                             const payload = stripUndefined(draft) ?? null
-                            await pb.collection("resources").update(activeResource.id, { assessment: payload })
+                            await supabase.from("resources").update({ assessment: payload }).eq("id", activeResource.id).select().single()
                             setResources(prev => prev.map(r => r.id === activeResource.id ? { ...r, assessment: draft } : r))
                             setAssessmentSaved(true)
                             setTimeout(() => setAssessmentSaved(false), 3000)
@@ -1504,17 +1559,16 @@ export default function Teacher() {
                       const day = i + 1
                       const isToday = day === now.getDate() && calMonth === now.getMonth() && calYear === now.getFullYear()
                       const isSelected = day === calSelected
-                      const isPast = calYear < now.getFullYear() || (calYear === now.getFullYear() && calMonth < now.getMonth()) || (calYear === now.getFullYear() && calMonth === now.getMonth() && day < now.getDate())
                       const hasEvents = (announcements[`${calYear}-${calMonth}-${day}`] || []).length > 0
                       return (
-                        <button key={day} onClick={() => !isPast && setCalSelected(day)} disabled={isPast}
+                        <button key={day} onClick={() => setCalSelected(day)}
                           className={`flex items-center justify-center rounded-lg text-sm font-medium transition relative min-h-[48px]
-                            ${isPast ? "text-gray-300 cursor-not-allowed" : isSelected ? "bg-navy-500 text-white shadow-md shadow-navy-500/25 z-10" : isToday ? "bg-navy-50 text-navy-700 font-bold ring-2 ring-navy-200" : "hover:bg-gray-50 text-gray-700"}`}>
+                            ${isSelected ? "bg-navy-500 text-white shadow-md shadow-navy-500/25 z-10" : isToday ? "bg-navy-50 text-navy-700 font-bold ring-2 ring-navy-200" : "hover:bg-gray-50 text-gray-700"}`}>
                           <span>{day}</span>
                           {hasEvents && (
                             (announcements[`${calYear}-${calMonth}-${day}`] || []).length > 1
-                              ? <span className={`absolute bottom-2 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold flex items-center justify-center leading-none ${isSelected ? "bg-white text-navy-500" : "bg-navy-500 text-white"}`}>{(announcements[`${calYear}-${calMonth}-${day}`] || []).length}</span>
-                              : <span className={`absolute bottom-2 w-1.5 h-1.5 rounded-full ${isSelected ? "bg-white" : "bg-navy-500"}`} />
+                              ? <span className={`absolute bottom-2 min-w-[18px] h-[18px] px-1 rounded-full text-[9px] font-bold flex items-center justify-center leading-none shadow-sm ${isSelected ? "bg-white text-navy-500" : "bg-navy-500 text-white"}`}>{(announcements[`${calYear}-${calMonth}-${day}`] || []).length}</span>
+                              : <span className={`absolute bottom-[13px] w-2 h-2 rounded-full ${(categoryDotColors[(announcements[`${calYear}-${calMonth}-${day}`] || [])[0]?.category] || "bg-navy-500")} cal-dot-pulse ${isSelected ? "ring-2 ring-white" : ""}`} />
                           )}
                         </button>
                       )

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
-import { pb } from "../pocketbase"
+import { supabase } from "../supabase"
 import { logActivity } from "../utils/activities"
 
 export type UserRole = "student" | "teacher" | "admin"
@@ -52,19 +52,28 @@ const AuthContext = createContext<AuthContextValue>({
   resolveConflict: () => {},
 })
 
-function recordToProfile(r: Record<string, any>): UserProfile {
+function mapProfile(row: Record<string, any>): UserProfile {
   return {
-    uid: r.uid || r.id,
-    email: r.email || "",
-    displayName: r.name || r.email?.split("@")[0] || "",
-    role: r.role || "student",
-    lrn: r.lrn || undefined,
-    gradeLevel: r.gradeLevel || undefined,
-    phone: r.phone || undefined,
-    employeeId: r.employeeId || undefined,
-    department: r.department || undefined,
-    joinDate: r.joinDate || undefined,
+    uid: row.uid || row.id,
+    email: row.email || "",
+    displayName: row.name || row.email?.split("@")[0] || "",
+    role: row.role || "student",
+    lrn: row.lrn || undefined,
+    gradeLevel: row.grade_level || row.gradeLevel || undefined,
+    phone: row.phone || undefined,
+    employeeId: row.employee_id || row.employeeId || undefined,
+    department: row.department || undefined,
+    joinDate: row.join_date || row.joinDate || undefined,
   }
+}
+
+async function fetchProfile(userId: string): Promise<UserProfile | null> {
+  const { data } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .maybeSingle()
+  return data ? mapProfile(data) : null
 }
 
 const CREDS_KEY = "als_credentials"
@@ -91,32 +100,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [sessionConflict, setSessionConflict] = useState(false)
-  const recordId = useRef<string | null>(null)
   const currentEmail = useRef<string | null>(null)
-
   const restored = useRef(false)
 
   useEffect(() => {
     if (restored.current) return
     restored.current = true
     const restore = async () => {
-      if (pb.authStore.isValid) {
-        try {
-          const res = await pb.collection("users").authRefresh({ requestKey: null })
-          const rec = res.record
-          const p = recordToProfile(rec)
-          recordId.current = rec.id
-          currentEmail.current = p.email
-          setUser({ uid: p.uid, email: p.email })
-          setProfile(p)
-        } catch (err) {
-          const status = (err as { status?: number })?.status
-          if (status === 401 || status === 403) pb.authStore.clear()
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.user) {
+          const p = await fetchProfile(session.user.id)
+          if (p) {
+            setUser({ uid: p.uid, email: p.email })
+            setProfile(p)
+            currentEmail.current = p.email
+          } else {
+            await supabase.auth.signOut()
+          }
         }
+      } catch {
+        await supabase.auth.signOut()
       }
       setLoading(false)
     }
     restore()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_OUT") {
+        setUser(null)
+        setProfile(null)
+        currentEmail.current = null
+      } else if (event === "SIGNED_IN" && session?.user) {
+        const p = await fetchProfile(session.user.id)
+        if (p) {
+          setUser({ uid: p.uid, email: p.email })
+          setProfile(p)
+          currentEmail.current = p.email
+        }
+      }
+    })
+    return () => subscription.unsubscribe()
   }, [])
 
   useEffect(() => {
@@ -135,15 +159,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = async (email: string, password: string): Promise<UserProfile> => {
-    const authData = await pb.collection("users").authWithPassword(email, password)
-    const userProfile = recordToProfile(authData.record)
-    recordId.current = authData.record.id
-    setUser({ uid: userProfile.uid, email: userProfile.email })
-    setProfile(userProfile)
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) throw error
+    const p = await fetchProfile(data.user.id)
+    if (!p) throw new Error("Profile not found")
+    setUser({ uid: p.uid, email: p.email })
+    setProfile(p)
     currentEmail.current = email
     saveCreds(email, password)
     try { logActivity({ user: email, action: "Login", detail: "Signed in to the system" }) } catch { /* offline */ }
-    return userProfile
+    return p
   }
 
   const register = async (data: {
@@ -153,28 +178,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     lrn?: string
     gradeLevel?: string
   }): Promise<UserProfile> => {
-    const rec = await pb.collection("users").create({
+    const { data: authData, error: authError } = await supabase.auth.signUp({
       email: data.email,
       password: data.password,
-      passwordConfirm: data.password,
+      options: { data: { name: data.displayName } },
+    })
+    if (authError) throw authError
+    if (!authData.user) throw new Error("Registration failed")
+
+    await supabase.from("profiles").insert({
+      id: authData.user.id,
+      uid: authData.user.id,
       name: data.displayName,
+      email: data.email,
       role: "student",
       lrn: data.lrn || "",
-      gradeLevel: data.gradeLevel || "",
+      grade_level: data.gradeLevel || "",
     })
-    const uid = rec.id
-    await pb.collection("users").update(uid, { uid })
-    await pb.collection("users").authWithPassword(data.email, data.password)
+
     const userProfile: UserProfile = {
-      uid,
+      uid: authData.user.id,
       email: data.email,
       displayName: data.displayName,
       role: "student",
       lrn: data.lrn,
       gradeLevel: data.gradeLevel,
     }
-    recordId.current = uid
-    setUser({ uid, email: data.email })
+    setUser({ uid: authData.user.id, email: data.email })
     setProfile(userProfile)
     currentEmail.current = data.email
     saveCreds(data.email, data.password)
@@ -185,8 +215,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     clearCreds()
     currentEmail.current = null
-    recordId.current = null
-    pb.authStore.clear()
+    await supabase.auth.signOut()
     setUser(null)
     setProfile(null)
   }
@@ -194,19 +223,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateProfile = async (data: Partial<Pick<UserProfile, "displayName" | "email" | "lrn" | "gradeLevel" | "phone" | "employeeId" | "department" | "joinDate">>) => {
     if (!user || !profile) return
     const updated = { ...profile, ...data }
-    const id = recordId.current
-    if (id) {
-      await pb.collection("users").update(id, {
-        name: data.displayName ?? profile.displayName,
-        email: data.email ?? profile.email,
-        lrn: data.lrn ?? profile.lrn ?? "",
-        gradeLevel: data.gradeLevel ?? profile.gradeLevel ?? "",
-        phone: data.phone ?? profile.phone ?? "",
-        employeeId: data.employeeId ?? profile.employeeId ?? "",
-        department: data.department ?? profile.department ?? "",
-        joinDate: data.joinDate ?? profile.joinDate ?? "",
-      })
-    }
+    const id = user.uid
+    await supabase.from("profiles").update({
+      name: data.displayName ?? profile.displayName,
+      email: data.email ?? profile.email,
+      lrn: data.lrn ?? profile.lrn ?? "",
+      grade_level: data.gradeLevel ?? profile.gradeLevel ?? "",
+      phone: data.phone ?? profile.phone ?? "",
+      employee_id: data.employeeId ?? profile.employeeId ?? "",
+      department: data.department ?? profile.department ?? "",
+      join_date: data.joinDate ?? profile.joinDate ?? "",
+    }).eq("id", id)
     setProfile(updated)
   }
 
