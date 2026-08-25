@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react"
 import type { ModuleTask, TaskType, RubricItem, TaskAttachment, ModuleBlock, AssessmentQuestion } from "../types"
 import AssessmentBuilder from "./AssessmentBuilder"
 
-const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "")
+const API_BASE = (import.meta.env.VITE_API_URL || (window.location.hostname === "localhost" ? "http://localhost:3001" : "")).replace(/\/+$/, "")
 
 const TASK_TYPES: { type: TaskType; icon: string; label: string; desc: string; color: string }[] = [
   { type: "assignment", icon: "fa-book-open", label: "Assignment", desc: "Task with instructions and file submission", color: "#1A73E8" },
