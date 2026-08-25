@@ -10,7 +10,7 @@ import { useAuth } from "../context/AuthContext"
 import { supabase, getActivities, subscribeActivities } from "../supabase"
 import type { NavItem } from "../types"
 
-const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/+$/, "")
+const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "")
 
 async function fetchAPI(path: string) {
   const res = await fetch(`${API_BASE}${path}`)
