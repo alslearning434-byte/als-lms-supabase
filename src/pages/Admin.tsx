@@ -72,6 +72,7 @@ export default function Admin() {
   const [teacherSaving, setTeacherSaving] = useState(false)
   const [teacherError, setTeacherError] = useState("")
   const [teachers, setTeachers] = useState<{ uid: string; displayName: string; email: string; department: string; employeeId: string; phone: string; joinDate: string }[]>([])
+  const [allUsers, setAllUsers] = useState<any[]>([])
   const [enrollmentModalOpen, setEnrollmentModalOpen] = useState(false)
   const [jhsModalOpen, setJhsModalOpen] = useState(false)
   const [shsModalOpen, setShsModalOpen] = useState(false)
@@ -121,6 +122,7 @@ export default function Admin() {
     const fetchStats = async () => {
       try {
         const users = await fetchAPI("/api/users")
+        setAllUsers(users)
         const all = users.map((u: { role?: string }) => ({ role: u.role }))
         setUserStats({
           total: all.length,
@@ -380,77 +382,27 @@ export default function Admin() {
     }
   }
 
-  const allUserRows = (userFilter === "jhs" ? [
-    { initials: "JD", name: "Juan Dela Cruz", email: "juan.delacruz@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2026", initialsBg: "bg-amber-100 text-amber-600" },
-    { initials: "PR", name: "Pedro Reyes", email: "pedro.reyes@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Feb 2026", initialsBg: "bg-red-100 text-red-600" },
-    { initials: "AG", name: "Ana Gomez", email: "ana.gomez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2026", initialsBg: "bg-blue-100 text-blue-600" },
-    { initials: "CT", name: "Carlos Tan", email: "carlos.tan@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2025", initialsBg: "bg-teal-100 text-teal-600" },
-    { initials: "MF", name: "Maria Flores", email: "maria.flores@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Oct 2025", initialsBg: "bg-pink-100 text-pink-600" },
-    { initials: "RG", name: "Ricardo Garcia", email: "ricardo.garcia@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2025", initialsBg: "bg-indigo-100 text-indigo-600" },
-    { initials: "LS", name: "Liza Santos", email: "liza.santos@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Aug 2025", initialsBg: "bg-rose-100 text-rose-600" },
-    { initials: "BM", name: "Ben Mendoza", email: "ben.mendoza@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2025", initialsBg: "bg-cyan-100 text-cyan-600" },
-    { initials: "CV", name: "Celia Villanueva", email: "celia.villanueva@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jun 2025", initialsBg: "bg-lime-100 text-lime-600" },
-    { initials: "DA", name: "Dante Aquino", email: "dante.aquino@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "May 2025", initialsBg: "bg-orange-100 text-orange-600" },
-    { initials: "ES", name: "Elena Santiago", email: "elena.santiago@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Apr 2025", initialsBg: "bg-purple-100 text-purple-600" },
-    { initials: "FC", name: "Fernando Cruz", email: "fernando.cruz@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2025", initialsBg: "bg-yellow-100 text-yellow-600" },
-    { initials: "GV", name: "Gina Villar", email: "gina.villar@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Feb 2025", initialsBg: "bg-emerald-100 text-emerald-600" },
-    { initials: "HS", name: "Hector Santos", email: "hector.santos@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2025", initialsBg: "bg-sky-100 text-sky-600" },
-    { initials: "IR", name: "Isabella Ramos", email: "isabella.ramos@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Dec 2024", initialsBg: "bg-violet-100 text-violet-600" },
-    { initials: "JB", name: "Joel Bautista", email: "joel.bautista@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2024", initialsBg: "bg-fuchsia-100 text-fuchsia-600" },
-    { initials: "KL", name: "Karen Lim", email: "karen.lim@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Oct 2024", initialsBg: "bg-rose-100 text-rose-600" },
-    { initials: "LF", name: "Leo Fernandez", email: "leo.fernandez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2024", initialsBg: "bg-teal-100 text-teal-600" },
-    { initials: "MD", name: "Mona Dela Torre", email: "mona.delatorre@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Aug 2024", initialsBg: "bg-amber-100 text-amber-600" },
-    { initials: "NA", name: "Nestor Aguilar", email: "nestor.aguilar@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2024", initialsBg: "bg-blue-100 text-blue-600" },
-    { initials: "OM", name: "Olivia Manalo", email: "olivia.manalo@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jun 2024", initialsBg: "bg-indigo-100 text-indigo-600" },
-    { initials: "PR2", name: "Paolo Ramirez", email: "paolo.ramirez@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "May 2024", initialsBg: "bg-pink-100 text-pink-600" },
-    { initials: "QS", name: "Queenie Sison", email: "queenie.sison@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Apr 2024", initialsBg: "bg-cyan-100 text-cyan-600" },
-    { initials: "RT", name: "Rafael Torres", email: "rafael.torres@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2024", initialsBg: "bg-lime-100 text-lime-600" },
-    { initials: "SM", name: "Sofia Mercado", email: "sofia.mercado@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Feb 2024", initialsBg: "bg-orange-100 text-orange-600" },
-    { initials: "TR", name: "Tomas Rivera", email: "tomas.rivera@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2024", initialsBg: "bg-purple-100 text-purple-600" },
-    { initials: "UD", name: "Ursula David", email: "ursula.david@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Dec 2023", initialsBg: "bg-sky-100 text-sky-600" },
-    { initials: "VG", name: "Victor Gonzales", email: "victor.gonzales@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2023", initialsBg: "bg-emerald-100 text-emerald-600" },
-    { initials: "WP", name: "Wanda Pineda", email: "wanda.pineda@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Oct 2023", initialsBg: "bg-violet-100 text-violet-600" },
-    { initials: "XL", name: "Xavier Lozano", email: "xavier.lozano@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2023", initialsBg: "bg-fuchsia-100 text-fuchsia-600" }
-  ] : userFilter === "shs" ? [
-    { initials: "MS", name: "Maria Santos", email: "maria.santos@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2026", initialsBg: "bg-blue-100 text-blue-600" },
-    { initials: "JL", name: "Jose Lopez", email: "jose.lopez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Dec 2025", initialsBg: "bg-purple-100 text-purple-600" },
-    { initials: "RM", name: "Rosa Mendoza", email: "rosa.mendoza@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Oct 2025", initialsBg: "bg-pink-100 text-pink-600" },
-    { initials: "KT", name: "Kevin Torres", email: "kevin.torres@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2025", initialsBg: "bg-teal-100 text-teal-600" },
-    { initials: "NP", name: "Nina Perez", email: "nina.perez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Aug 2025", initialsBg: "bg-indigo-100 text-indigo-600" },
-    { initials: "OR", name: "Oscar Ramos", email: "oscar.ramos@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2025", initialsBg: "bg-amber-100 text-amber-600" },
-    { initials: "PM", name: "Paula Martinez", email: "paula.martinez@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Jun 2025", initialsBg: "bg-rose-100 text-rose-600" },
-    { initials: "QC", name: "Quinn Cruz", email: "quinn.cruz@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "May 2025", initialsBg: "bg-cyan-100 text-cyan-600" },
-    { initials: "RD", name: "Ria Dimagiba", email: "ria.dimagiba@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Apr 2025", initialsBg: "bg-lime-100 text-lime-600" },
-    { initials: "SJ", name: "Sam Jimenez", email: "sam.jimenez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2025", initialsBg: "bg-orange-100 text-orange-600" },
-    { initials: "TA", name: "Trisha Angeles", email: "trisha.angeles@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Feb 2025", initialsBg: "bg-purple-100 text-purple-600" },
-    { initials: "US", name: "Uriel Salvacion", email: "uriel.salvacion@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2025", initialsBg: "bg-sky-100 text-sky-600" },
-    { initials: "VM", name: "Vince Macapagal", email: "vince.macapagal@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Dec 2024", initialsBg: "bg-emerald-100 text-emerald-600" },
-    { initials: "WC", name: "Wendy Corpuz", email: "wendy.corpuz@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2024", initialsBg: "bg-violet-100 text-violet-600" },
-    { initials: "YD", name: "Yanni Del Rosario", email: "yanni.delrosario@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Oct 2024", initialsBg: "bg-fuchsia-100 text-fuchsia-600" },
-    { initials: "ZC", name: "Zandro Cabrera", email: "zandro.cabrera@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2024", initialsBg: "bg-rose-100 text-rose-600" },
-    { initials: "AP", name: "Angela Pangilinan", email: "angela.pangilinan@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Aug 2024", initialsBg: "bg-amber-100 text-amber-600" },
-    { initials: "BS", name: "Bong Salazar", email: "bong.salazar@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2024", initialsBg: "bg-teal-100 text-teal-600" },
-    { initials: "CL2", name: "Cathy Lopez", email: "cathy.lopez@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jun 2024", initialsBg: "bg-blue-100 text-blue-600" },
-    { initials: "DA2", name: "Dexter Alcantara", email: "dexter.alcantara@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "May 2024", initialsBg: "bg-indigo-100 text-indigo-600" },
-    { initials: "EM", name: "Eva Magtoto", email: "eva.magtoto@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Apr 2024", initialsBg: "bg-pink-100 text-pink-600" },
-    { initials: "FN", name: "Freddie Natividad", email: "freddie.natividad@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Mar 2024", initialsBg: "bg-cyan-100 text-cyan-600" },
-    { initials: "GZ", name: "Grace Zamora", email: "grace.zamora@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Feb 2024", initialsBg: "bg-lime-100 text-lime-600" },
-    { initials: "HT", name: "Henry Tambong", email: "henry.tambong@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jan 2024", initialsBg: "bg-orange-100 text-orange-600" },
-    { initials: "IV", name: "Iris Valenzuela", email: "iris.valenzuela@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Dec 2023", initialsBg: "bg-purple-100 text-purple-600" },
-    { initials: "JR", name: "Jeko Resurreccion", email: "jeko.resurreccion@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Nov 2023", initialsBg: "bg-sky-100 text-sky-600" },
-    { initials: "KM", name: "Kyla Manansala", email: "kyla.manansala@gmail.com", status: "Inactive", statusColor: "bg-yellow-100 text-yellow-600", joined: "Oct 2023", initialsBg: "bg-emerald-100 text-emerald-600" },
-    { initials: "LC", name: "Luis Catapang", email: "luis.catapang@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Sep 2023", initialsBg: "bg-violet-100 text-violet-600" },
-    { initials: "MA2", name: "Mitch Araneta", email: "mitch.araneta@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Aug 2023", initialsBg: "bg-fuchsia-100 text-fuchsia-600" },
-    { initials: "NT", name: "Noel Tengco", email: "noel.tengco@gmail.com", status: "Active", statusColor: "bg-green-100 text-green-600", joined: "Jul 2023", initialsBg: "bg-rose-100 text-rose-600" }
-  ] : teachers.map((t) => ({
-    initials: t.displayName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2),
-    name: t.displayName,
-    email: t.email,
-    status: "Active",
-    statusColor: "bg-green-100 text-green-600",
-    joined: t.joinDate || "—",
-    initialsBg: "bg-green-100 text-green-600"
-  })))
+  const cohortColors = ["bg-amber-100 text-amber-600", "bg-red-100 text-red-600", "bg-blue-100 text-blue-600", "bg-teal-100 text-teal-600", "bg-pink-100 text-pink-600", "bg-indigo-100 text-indigo-600", "bg-rose-100 text-rose-600", "bg-cyan-100 text-cyan-600", "bg-lime-100 text-lime-600", "bg-orange-100 text-orange-600", "bg-purple-100 text-purple-600", "bg-yellow-100 text-yellow-600", "bg-emerald-100 text-emerald-600", "bg-sky-100 text-sky-600", "bg-violet-100 text-violet-600", "bg-fuchsia-100 text-fuchsia-600"]
+  function getCohort(gl: string) {
+    if (!gl) return null
+    const g = parseInt(String(gl).replace(/\D/g, ""), 10)
+    if (isNaN(g)) return null
+    return g >= 11 ? "shs" : "jhs"
+  }
+  function userToRow(u: any, idx: number) {
+    const name = u.displayName || u.name || "Unknown"
+    const initials = name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
+    const joined = u.joinDate || u.join_date || ""
+    const joinedDisplay = joined ? new Date(joined).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "—"
+    return { initials, name, email: u.email || "", status: "Active", statusColor: "bg-green-100 text-green-600", joined: joinedDisplay, initialsBg: cohortColors[idx % cohortColors.length] }
+  }
+
+  const allUserRows = (userFilter === "jhs"
+    ? allUsers.filter((u: any) => (u.role === "student" || !u.role) && getCohort(u.gradeLevel || u.grade_level) === "jhs").map((u: any, i: number) => userToRow(u, i))
+    : userFilter === "shs"
+    ? allUsers.filter((u: any) => (u.role === "student" || !u.role) && getCohort(u.gradeLevel || u.grade_level) === "shs").map((u: any, i: number) => userToRow(u, i))
+    : teachers.map((t, i) => userToRow({ ...t, displayName: t.displayName, joinDate: t.joinDate }, i))
+  )
   const userTotalPages = Math.ceil(allUserRows.length / userPageSize)
   const userPaginatedRows = allUserRows.slice((userPage - 1) * userPageSize, userPage * userPageSize)
 
