@@ -1412,6 +1412,16 @@ app.get("/api/reports/cohort-performance", async (req, res) => {
   }
 })
 
+// ── Serve React build in production ──
+import { existsSync } from "fs"
+const distPath = join(__dirname, "dist")
+if (existsSync(distPath)) {
+  app.use(express.static(distPath))
+  app.get("*", (req, res) => {
+    res.sendFile(join(distPath, "index.html"))
+  })
+}
+
 app.listen(PORT, () => {
-  console.log(`Upload server running on http://localhost:${PORT}`)
+  console.log(`ALS LMS server running on http://localhost:${PORT}`)
 })
